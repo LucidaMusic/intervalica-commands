@@ -12,6 +12,8 @@ import src.main.java.com.composer.infrastructure.ui.SongMonitorWindow;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class AddChordFlow implements TransactionalFlow {
 
@@ -19,12 +21,10 @@ public class AddChordFlow implements TransactionalFlow {
   private final SongMonitorWindow uiWindow;
   private final String customChordName;
 
-  // Transactional intermediate variables
   private String resolvedParentId = null;
   private int overtoneCount = 0;
   private Duration chordDuration = Duration.QUARTER;
 
-  // Helper structure to cleanly hold multi-dimensional input variables locally
   private static class NodeSpecificationBlueprint {
     Interval interval;
     int octaveShift = 0;
@@ -33,6 +33,12 @@ public class AddChordFlow implements TransactionalFlow {
 
   private final NodeSpecificationBlueprint tonicBlueprint = new NodeSpecificationBlueprint();
   private final List<NodeSpecificationBlueprint> overtonesBlueprints = new ArrayList<>();
+
+  // Compiled pattern to parse interval token and optional inline modifiers
+  private static final Pattern BLUEPRINT_PARSER_PATTERN = Pattern.compile(
+    "^([^\\s-]+)(?:\\s+-oct\\s+([+-]?\\d+))?(?:\s+(-inv))?$",
+    Pattern.CASE_INSENSITIVE
+  );
 
   public AddChordFlow(CommandHistoryManager historyManager, SongMonitorWindow uiWindow, String customChordName) {
     this.historyManager = historyManager;
@@ -88,8 +94,9 @@ public class AddChordFlow implements TransactionalFlow {
       );
       executeStep(stepRef);
 
-      uiWindow.printToTerminal("\n--- Defining Tonic Properties ---");
-      captureNodePropertiesWorkflow(this.tonicBlueprint);
+      uiWindow.printToTerminal("\n--- Define Tonic Specifications ---");
+      printIntervalMenu();
+      executeSpecificationWorkflowStep("Configure Tonic (e.g., '2 -oct +1 -inv' or '3/2'): ", this.tonicBlueprint);
     }
 
     // STEP 2: Request Overtone branch counts (If not inline)
@@ -103,12 +110,17 @@ public class AddChordFlow implements TransactionalFlow {
       executeStep(stepOvertonesCount);
     }
 
-    // STEP 3: Build individual Overtone specifications
+    // STEP 3: Build individual Overtone specifications in single unified prompts
+    if (overtoneCount > 0) {
+      printIntervalMenu();
+    }
     for (int i = 0; i < overtoneCount; i++) {
       int overtoneIdx = i + 1;
-      uiWindow.printToTerminal(String.format("\n--- Defining Overtone #%d (Node ID: O%d_%d) ---", overtoneIdx, chordIndex, overtoneIdx));
       NodeSpecificationBlueprint overtoneBp = new NodeSpecificationBlueprint();
-      captureNodePropertiesWorkflow(overtoneBp);
+      executeSpecificationWorkflowStep(
+        String.format("Configure Overtone #%d (Node ID: O%d_%d): ", overtoneIdx, chordIndex, overtoneIdx),
+        overtoneBp
+      );
       overtonesBlueprints.add(overtoneBp);
     }
 
@@ -143,7 +155,6 @@ public class AddChordFlow implements TransactionalFlow {
       operationalChord.getOvertones().add(overtoneNode);
     }
 
-    // Execute and push state into history manager
     AddChordCommand cmd = new AddChordCommand(targetSong, operationalChord);
     historyManager.executeCommand(cmd);
 
@@ -152,66 +163,52 @@ public class AddChordFlow implements TransactionalFlow {
   }
 
   /**
-   * COMPOSITE WORKFLOW WORKER
-   * Captures Ratio Selection (with custom math operations), Octavation shifts, and Direction directions seamlessly.
+   * UNIFIED COMPACT WORKFLOW STEP
+   * Parses the interval token and its flags (-oct, -inv) in a single user input interaction.
    */
-  private void captureNodePropertiesWorkflow(NodeSpecificationBlueprint targetBlueprint) throws FlowContext.CancelException, FlowContext.ExitException {
-    printIntervalMenu();
-
-    // A. Resolve Core Interval Ratio (Supports custom expressions input interception)
-    FlowStep<Interval> stepIntervalChoice = new FlowStep<>(
-      "Select Interval Index (Choose 0 for Custom Expression input): ",
-      "^\\d+$",
-      "Invalid selection option index position.",
+  private void executeSpecificationWorkflowStep(String prompt, NodeSpecificationBlueprint blueprint) throws FlowContext.CancelException, FlowContext.ExitException {
+    FlowStep<NodeSpecificationBlueprint> unifiedStep = new FlowStep<>(
+      prompt,
+      "^.+$", // Accept any string to handle tokenization manually inside the parser block
+      "Invalid entry format syntax.",
       input -> {
-        int choice = Integer.parseInt(input);
-        if (choice < 0 || choice >= Interval.values().length) throw new IllegalArgumentException();
-        targetBlueprint.interval = Interval.values()[choice];
-      }
-    );
-    executeStep(stepIntervalChoice);
-
-// Intercept Custom Equation Branch
-    if (targetBlueprint.interval == Interval.CUSTOM) {
-      FlowStep<Interval> stepCustomExpression = new FlowStep<>(
-        "Enter Custom Ratio Fraction or Operation Expression (e.g., '(3/2)*2+45' or '11/8'): ",
-        "^.+$",
-        "Mathematical notation format parsing error.",
-        input -> {
-          String cleanExpr = input.replaceAll("\\s+", "");
-
-          // FIXED: We now use the evaluated value to give rich visual feedback to the composer!
-          double evaluatedRatio = Interval.evaluateMathExpression(cleanExpr);
-          uiWindow.printToTerminal(String.format("   [Parsed] Expression resolved to a raw multiplier ratio of: %.4f", evaluatedRatio));
-
-          targetBlueprint.interval = new Interval("CHISTER_EXPR", cleanExpr);
+        Matcher matcher = BLUEPRINT_PARSER_PATTERN.matcher(input.trim());
+        if (!matcher.matches()) {
+          throw new IllegalArgumentException("Input format does not match required layout syntax configuration rules.");
         }
-      );
-      executeStep(stepCustomExpression);
-    }
 
-    // B. Capture Octavation Shift Coefficient (+2, -1, 0)
-    FlowStep<Integer> stepOctave = new FlowStep<>(
-      "Enter Octave Shift factor (e.g., 0 for default, +2 to shift up, -1 to shift down): ",
-      "^[+-]?\\d+$",
-      "Please enter a valid signed integer coefficient (e.g., 0, +1, -2).",
-      input -> {
-        String clean = input.startsWith("+") ? input.substring(1) : input;
-        targetBlueprint.octaveShift = Integer.parseInt(clean);
-      }
-    );
-    executeStep(stepOctave);
+        // 1. Parse Interval Token (Can be index position number, fraction or math equation string)
+        String intervalToken = matcher.group(1);
+        if (intervalToken.matches("^\\d+$")) {
+          int choice = Integer.parseInt(intervalToken);
+          // Skip index 0 (which was the old custom token placeholder) and validate bounds
+          if (choice <= 0 || choice >= Interval.values().length) {
+            throw new IllegalArgumentException("Selected list index integer is out of bounds.");
+          }
+          blueprint.interval = Interval.values()[choice];
+        } else {
+          // It's a direct fraction or math formula sacada de la chistera!
+          String cleanExpr = intervalToken.replaceAll("\\s+", "");
+          double evaluated = Interval.evaluateMathExpression(cleanExpr);
+          uiWindow.printToTerminal(String.format("   [Parsed] Expression resolved to a raw multiplier ratio of: %.4f", evaluated));
+          blueprint.interval = new Interval("CHISTER_EXPR", cleanExpr);
+        }
 
-    // C. Capture Inversion Direction Flags (-inv / none)
-    FlowStep<Boolean> stepInversion = new FlowStep<>(
-      "Type '-inv' to invert interval direction down, or type 'none' to keep default up direction: ",
-      "^(?i)(-inv|none)$",
-      "Invalid direction parameter flag. Please type exactly '-inv' or 'none'.",
-      input -> targetBlueprint.inverted = input.equalsIgnoreCase("-inv")
-    );
-    executeStep(stepInversion);
+        // 2. Parse Inline Octave Shift Flag (-oct)
+        if (matcher.group(2) != null) {
+          String octaveToken = matcher.group(2);
+          if (octaveToken.startsWith("+")) octaveToken = octaveToken.substring(1);
+          blueprint.octaveShift = Integer.parseInt(octaveToken);
+        } else {
+          blueprint.octaveShift = 0; // Default fallback
+        }
+
+        // 3. Parse Inline Inversion Direction Flag (-inv)
+
+        blueprint.inverted = (matcher.group(3) != null);
+      });
+    executeStep(unifiedStep);
   }
-
 
   private void executeStep(FlowStep<?> step) throws FlowContext.CancelException, FlowContext.ExitException {
     while (true) {
@@ -238,19 +235,15 @@ public class AddChordFlow implements TransactionalFlow {
       for (Song.HarmonicNode o : c.getOvertones()) {
         uiWindow.printToTerminal(String.format("    ├── %s (Overtone Node)", o.getId()));
       }
-    }
-    uiWindow.printToTerminal("------------------------------------------");
+    } uiWindow.printToTerminal("------------------------------------------");
   }
 
   private void printIntervalMenu() {
     uiWindow.printToTerminal("\n--- Available Proportional Just Intervals ---");
     Interval[] vals = Interval.values();
-    for (int i = 0; i < vals.length; i++) {
-      if (vals[i] == Interval.CUSTOM) {
-        uiWindow.printToTerminal(" [ 0] -> ** CUSTOM MATHEMATICAL EXPRESSION (Sacado de Chistera) **");
-      } else {
-        uiWindow.printToTerminal(String.format(" [%2d] %s (Ratio: %s)", i, vals[i].name(), vals[i].getExpression()));
-      }
+    for (int i = 1; i < vals.length; i++) {
+      // Start at index 1 to omit the old CUSTOM placeholder item
+      uiWindow.printToTerminal(String.format(" [%d] %s (Ratio: %s)", i, vals[i].name(), vals[i].getExpression()));
     }
     uiWindow.printToTerminal("----------------------------------------------");
   }
