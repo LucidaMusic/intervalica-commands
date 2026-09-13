@@ -1,6 +1,5 @@
 package src.main.java.com.composer.core.usecase.impl;
 
-
 import src.main.java.com.composer.core.domain.model.AddChordCommand;
 import src.main.java.com.composer.core.domain.model.CommandHistoryManager;
 import src.main.java.com.composer.core.domain.model.Song;
@@ -18,18 +17,20 @@ public class AddChordFlow implements TransactionalFlow {
 
     private final CommandHistoryManager historyManager;
     private final SongMonitorWindow uiWindow;
+    private final String customChordName; // Injected shortcut flag configuration
 
     // Transactional structural states
-    private String customChordName = ""; // NEW: Variable state to hold optional chord labels
     private String resolvedParentId = null;
     private Interval tonicInterval = Interval.PERFECT_UNISON;
     private int overtoneCount = 0;
     private final List<Interval> overtoneIntervals = new ArrayList<>();
     private Duration chordDuration = Duration.QUARTER;
 
-    public AddChordFlow(CommandHistoryManager historyManager, SongMonitorWindow uiWindow) {
+    // Updated Constructor to receive flags
+    public AddChordFlow(CommandHistoryManager historyManager, SongMonitorWindow uiWindow, String customChordName) {
         this.historyManager = historyManager;
         this.uiWindow = uiWindow;
+        this.customChordName = customChordName;
     }
 
     @Override
@@ -38,28 +39,30 @@ public class AddChordFlow implements TransactionalFlow {
 
         overtoneIntervals.clear();
         resolvedParentId = null;
-        customChordName = "";
 
         int chordIndex = targetSong.getNextChordIndex();
         String currentTonicId = "T" + chordIndex;
 
         uiWindow.printToTerminal("\n-------------------------------------------------------------");
         uiWindow.printToTerminal(String.format(" >>> GRAPH WORKSPACE WIZARD: Creating Chord %d (Tonic ID: %s) <<< ", chordIndex, currentTonicId));
+        if (customChordName != null && !customChordName.isBlank()) {
+            uiWindow.printToTerminal(" -> Pre-assigned Name Attribute: \"" + customChordName + "\"");
+        }
         uiWindow.printToTerminal("-------------------------------------------------------------");
 
-        // --- NEW STEP 0: CAPTURE OPTIONAL CHORD ALIAS LABEL ---
-        uiWindow.printToTerminal("Enter a custom name/label for this chord (e.g., 'E from A' or leave empty for default): ");
-        // We bypass standard regex check using empty pattern match verification to allow free text or pure enters
-        String nameInput = uiWindow.readInputFromUI();
-        this.customChordName = nameInput.trim();
+        // --- FIXED: PRIORITIZE INLINE ARGUMENT FOR OVERTONE COUNT GLOBALLY ---
+        boolean hasInlineCount = (inlineArgument != null && inlineArgument.matches("^\\d+$"));
+        if (hasInlineCount) {
+            this.overtoneCount = Integer.parseInt(inlineArgument);
+            uiWindow.printToTerminal("-> Using inline parameter: " + this.overtoneCount + " overtone(s) pre-configured.");
+        }
 
-        // Automation criteria for the first chord
+        // STEP 1: Resolve Parent Node Reference and interval offsets
         if (chordIndex == 1) {
             this.resolvedParentId = null;
             this.tonicInterval = Interval.PERFECT_UNISON;
             uiWindow.printToTerminal("-> First chord detected. Automatically anchoring Tonic to BASE frequency via PERFECT_UNISON (1/1).");
         } else {
-            // STEP 1: Resolve Parent Node Reference
             printAvailableNodesMenu(targetSong);
             FlowStep<String> stepRef = new FlowStep<>(
               "Enter Target Parent Node ID for this Tonic (or type 'BASE'): ",
@@ -70,16 +73,13 @@ public class AddChordFlow implements TransactionalFlow {
                       this.resolvedParentId = null;
                   } else {
                       Song.HarmonicNode parentNode = targetSong.findNodeById(input);
-                      if (parentNode == null) {
-                          throw new IllegalArgumentException("Node ID not found in active graph ecosystem.");
-                      }
+                      if (parentNode == null) throw new IllegalArgumentException("Node ID not found.");
                       this.resolvedParentId = parentNode.getId();
                   }
               }
             );
             executeStep(stepRef);
 
-            // STEP 2: Resolve Interval relation to parent
             printIntervalMenu();
             FlowStep<Interval> stepTonicInt = new FlowStep<>(
               "Select Interval Index from Parent Node to this Tonic: ",
@@ -94,16 +94,18 @@ public class AddChordFlow implements TransactionalFlow {
             executeStep(stepTonicInt);
         }
 
-        // STEP 3: Request Overtone branch counts
-        FlowStep<Integer> stepOvertonesCount = new FlowStep<>(
-          "How many Overtones will branch out from this Tonic? (e.g., 2): ",
-          "^\\d+$",
-          "Please enter a valid positive integer.",
-          input -> this.overtoneCount = Integer.parseInt(input)
-        );
-        executeStep(stepOvertonesCount);
+        // STEP 2: Request Overtone branch counts (ONLY IF NOT PROVIDED INLINE)
+        if (!hasInlineCount) {
+            FlowStep<Integer> stepOvertonesCount = new FlowStep<>(
+              "How many Overtones will branch out from this Tonic? (e.g., 2): ",
+              "^\\d+$",
+              "Please enter a valid positive integer.",
+              input -> this.overtoneCount = Integer.parseInt(input)
+            );
+            executeStep(stepOvertonesCount);
+        }
 
-        // STEP 4: Build Overtone instances
+        // STEP 3: Build Overtone instances
         if (overtoneCount > 0) {
             printIntervalMenu();
         }
@@ -122,7 +124,7 @@ public class AddChordFlow implements TransactionalFlow {
             executeStep(stepOvertone);
         }
 
-        // STEP 5: Request structural duration profile
+        // STEP 4: Request structural duration profile
         printDurationMenu();
         FlowStep<Duration> stepDuration = new FlowStep<>(
           "Select Duration Index for this chord footprint block: ",
@@ -138,7 +140,6 @@ public class AddChordFlow implements TransactionalFlow {
 
         // TRANSACTION ASSEMBLY PHASE
         Song.HarmonicNode rootNode = new Song.HarmonicNode(currentTonicId, resolvedParentId, tonicInterval, "ROOT");
-        // UPDATED: Injected customChordName variable parameter string into constructor
         Song.Chord operationalChord = new Song.Chord("C" + chordIndex, customChordName, rootNode, chordDuration);
 
         for (int i = 0; i < overtoneIntervals.size(); i++) {
@@ -147,7 +148,6 @@ public class AddChordFlow implements TransactionalFlow {
             operationalChord.getOvertones().add(overtoneNode);
         }
 
-        // Commit via Command History tracking pipeline
         AddChordCommand cmd = new AddChordCommand(targetSong, operationalChord);
         historyManager.executeCommand(cmd);
 
