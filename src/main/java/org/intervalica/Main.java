@@ -1,7 +1,6 @@
 package org.intervalica;
 
 
-
 import org.intervalica.core.domain.model.CommandHistoryManager;
 import org.intervalica.core.domain.model.Song;
 import org.intervalica.infrastructure.ui.SongMonitorWindow;

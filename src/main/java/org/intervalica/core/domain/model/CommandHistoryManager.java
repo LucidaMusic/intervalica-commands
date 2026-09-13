@@ -1,7 +1,6 @@
 package org.intervalica.core.domain.model;
 
 
-
 import org.intervalica.infrastructure.ui.SongMonitorWindow;
 
 import java.util.Stack;

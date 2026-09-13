@@ -1,8 +1,6 @@
 package org.intervalica.infrastructure.cli;
 
 
-
-
 import org.intervalica.core.domain.model.CommandHistoryManager;
 import org.intervalica.core.domain.model.Song;
 import org.intervalica.core.usecase.base.FlowContext;

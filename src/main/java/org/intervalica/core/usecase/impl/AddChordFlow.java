@@ -1,7 +1,6 @@
 package org.intervalica.core.usecase.impl;
 
 
-
 import org.intervalica.core.domain.model.AddChordCommand;
 import org.intervalica.core.domain.model.CommandHistoryManager;
 import org.intervalica.core.domain.model.Song;

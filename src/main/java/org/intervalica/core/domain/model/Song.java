@@ -3,7 +3,7 @@ package org.intervalica.core.domain.model;
 import lombok.Getter;
 import org.intervalica.core.domain.types.Duration;
 import org.intervalica.core.domain.types.Interval;
-
+import org.intervalica.infrastructure.audio.AudioSynthesizerEngine;
 
 import java.io.Serial;
 import java.io.Serializable;
@@ -14,7 +14,7 @@ import java.util.Map;
 
 public class Song implements Serializable {
   @Serial
-  private static final long serialVersionUID = 7L; // Updated structural fingerprint tracking version
+  private static final long serialVersionUID = 6L;
 
   @Getter
   public static class HarmonicNode implements Serializable {
@@ -73,6 +73,9 @@ public class Song implements Serializable {
   private String author = "Graph Composer Expert";
   private int bpm = 120;
   private double referenceFrequency = 440.0;
+
+  // --- WAVEFORM TIMBRE STATE ---
+  private AudioSynthesizerEngine.Waveform activeWaveform = AudioSynthesizerEngine.Waveform.SINE;
 
   private final List<Chord> chords = new ArrayList<>();
   private transient List<Runnable> listeners = new ArrayList<>();
@@ -155,24 +158,18 @@ public class Song implements Serializable {
 
       HarmonicNode subRoot = subsequentChord.getRootNode();
       if (subRoot.getParentId() != null && protectedIdsLowercase.contains(subRoot.getParentId().toLowerCase())) {
-        blockingDependencies.add(String.format("Tonic %s of Chord %s (\"%s\")",
-          subRoot.getId(), subsequentChord.getChordId(), subsequentChord.getName()));
+        blockingDependencies.add(String.format("Tonic %s of Chord %s (\"%s\")", subRoot.getId(), subsequentChord.getChordId(), subsequentChord.getName()));
       }
 
       for (HarmonicNode subOvertone : subsequentChord.getOvertones()) {
         if (subOvertone.getParentId() != null && protectedIdsLowercase.contains(subOvertone.getParentId().toLowerCase())) {
-          blockingDependencies.add(String.format("Overtone %s of Chord %s (\"%s\")",
-            subOvertone.getId(), subsequentChord.getChordId(), subsequentChord.getName()));
+          blockingDependencies.add(String.format("Overtone %s of Chord %s (\"%s\")", subOvertone.getId(), subsequentChord.getChordId(), subsequentChord.getName()));
         }
       }
     }
     return blockingDependencies;
   }
 
-  /**
-   * NEW INTEGRITY CHECKER: SPECIFIC OVERTONE DELETION SAFETY
-   * Verifies if any subsequent node branches off a single isolated overtone before removing it.
-   */
   public synchronized List<String> verifyOvertoneDeletionSafety(String overtoneId) {
     List<String> blockingDependencies = new ArrayList<>();
     if (overtoneId == null) return blockingDependencies;
@@ -187,14 +184,12 @@ public class Song implements Serializable {
 
       HarmonicNode subRoot = subsequentChord.getRootNode();
       if (subRoot.getParentId() != null && subRoot.getParentId().toLowerCase().equals(targetLower)) {
-        blockingDependencies.add(String.format("Tonic %s of Chord %s (\"%s\")",
-          subRoot.getId(), subsequentChord.getChordId(), subsequentChord.getName()));
+        blockingDependencies.add(String.format("Tonic %s of Chord %s (\"%s\")", subRoot.getId(), subsequentChord.getChordId(), subsequentChord.getName()));
       }
 
       for (HarmonicNode subOvertone : subsequentChord.getOvertones()) {
         if (subOvertone.getParentId() != null && subOvertone.getParentId().toLowerCase().equals(targetLower)) {
-          blockingDependencies.add(String.format("Overtone %s of Chord %s (\"%s\")",
-            subOvertone.getId(), subsequentChord.getChordId(), subsequentChord.getName()));
+          blockingDependencies.add(String.format("Overtone %s of Chord %s (\"%s\")", subOvertone.getId(), subsequentChord.getChordId(), subsequentChord.getName()));
         }
       }
     }
@@ -277,6 +272,15 @@ public class Song implements Serializable {
     notifyListeners();
   }
 
+  public synchronized AudioSynthesizerEngine.Waveform getActiveWaveform() {
+    return activeWaveform;
+  }
+
+  public synchronized void setActiveWaveform(AudioSynthesizerEngine.Waveform activeWaveform) {
+    this.activeWaveform = activeWaveform;
+    notifyListeners();
+  }
+
   public synchronized void registerListener(Runnable listener) {
     if (listeners == null) listeners = new ArrayList<>();
     listeners.add(listener);
@@ -292,6 +296,7 @@ public class Song implements Serializable {
     this.author = other.author;
     this.bpm = other.bpm;
     this.referenceFrequency = other.referenceFrequency;
+    this.activeWaveform = other.activeWaveform; // Copy waveform state correctly
     this.chords.clear();
     this.chords.addAll(other.chords);
     notifyListeners();

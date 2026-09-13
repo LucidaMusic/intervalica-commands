@@ -1,8 +1,5 @@
 package org.intervalica.infrastructure.cli;
 
-
-
-
 import org.intervalica.core.domain.model.*;
 import org.intervalica.core.domain.types.Duration;
 import org.intervalica.core.domain.types.Interval;
@@ -47,7 +44,7 @@ public class CommandRouter {
       (_, matcher, s, h, ui) -> new AddChordFlow(h, ui, matcher.group(1)).execute(s, matcher.group(2))
     ));
 
-    // --- NEW ROUTE: ADD OVERTONE TO EXISTING CHORD ---
+    // Add Overtone
     registry.add(new RegisteredRoute(
       "^add[- ]overtone\\s+([a-zA-Z0-9_]+)$", "add-overtone <chord-id>", "Appends a new individual overtone node into an existing active chord block.",
       (_, matcher, s, h, ui) -> {
@@ -58,7 +55,6 @@ public class CommandRouter {
           return;
         }
 
-        // Display mnemonic specification guidelines
         ui.printToTerminal("\n=================== CHORD ADDITION SPECIFICATION LEGEND ===================");
         for (Interval interval : Interval.getSystemIntervals()) {
           ui.printToTerminal(String.format("  • %-18s -> Accepted IDs: %s", interval.name(), Arrays.toString(interval.getAliases())));
@@ -90,7 +86,6 @@ public class CommandRouter {
         }
         boolean inv = (specMatcher.group(4) != null);
 
-        // Compute automatic incremental ID matching layout positioning (e.g. O1_4)
         String numericPart = chord.getChordId().replaceAll("\\D+", "");
         String overtoneId = String.format("O%s_%d", numericPart, chord.getOvertones().size() + 1);
 
@@ -101,10 +96,10 @@ public class CommandRouter {
       }
     ));
 
-    // --- NEW ROUTE: REMOVE SINGLE OVERTONE ---
+    // Remove Overtone
     registry.add(new RegisteredRoute(
       "^remove[- ]overtone\\s+([a-zA-Z0-9_]+)$", "remove-overtone <overtone-id>", "Deletes a single isolated overtone node if no future branches anchor onto it.",
-      (_, matcher, s, h, ui) -> {
+      (input, matcher, s, h, ui) -> {
         String overtoneId = matcher.group(1).trim();
         Song.HarmonicNode node = s.findNodeById(overtoneId);
         if (node == null || !node.getLabel().equals("OVERTONE")) {
@@ -112,7 +107,6 @@ public class CommandRouter {
           return;
         }
 
-        // Integrity Check
         List<String> blocks = s.verifyOvertoneDeletionSafety(overtoneId);
         if (!blocks.isEmpty()) {
           ui.printToTerminal(String.format("[BLOCKING ERROR] Cannot delete overtone %s. Subsequent branches rely on its value: %s", overtoneId, blocks));
@@ -126,10 +120,10 @@ public class CommandRouter {
       }
     ));
 
-    // --- NEW ROUTE: CLEAR SONG SCOPE ---
+    // Clear Song
     registry.add(new RegisteredRoute(
       "^clear$", "clear", "Wipes all chord progressions from active workspace memory cleanly.",
-      (input, matcher, s, h, ui) -> {
+      (_, matcher, s, h, ui) -> {
         if (s.getChords().isEmpty()) {
           ui.printToTerminal("[Warning] Workspace environment is already clear.");
           return;
@@ -137,6 +131,18 @@ public class CommandRouter {
         ClearSongCommand cmd = new ClearSongCommand(s);
         h.executeCommand(cmd);
         ui.printToTerminal("[Success] Score workspace canvas wiped successfully. Undo is available.");
+      }
+    ));
+
+    // Active Timbre Waveform Context Switcher
+    registry.add(new RegisteredRoute(
+      "^set-wave\\s+(sine|square|sawtooth|triangle)$", "set-wave <sine|square|sawtooth|triangle>",
+      "Alters the acoustic timbre texture model engine signature on the fly.",
+      (input, matcher, s, h, ui) -> {
+        String waveToken = matcher.group(1).trim().toUpperCase();
+        AudioSynthesizerEngine.Waveform selectedWave = AudioSynthesizerEngine.Waveform.valueOf(waveToken);
+        s.setActiveWaveform(selectedWave);
+        ui.printToTerminal("[Audio Engine] Synthesizer core timbre morphed onto: " + selectedWave.name() + " wave physics model.");
       }
     ));
 
@@ -178,7 +184,6 @@ public class CommandRouter {
       h.executeCommand(cmd);
       ui.printToTerminal(String.format("[Success] Chord %s properties modified successfully.", id));
     }));
-
     registry.add(new RegisteredRoute("^edit[- ]node\\s+([a-zA-Z0-9_]+)\\s+-ref\\s+([^\\s]+)\\s+-properties\\s+(.+)$", "edit-node  -ref  -properties ", "Mutates node wiring vectors checking directional chronological integrity.", (input, matcher, s, h, ui) -> {
       String targetNodeId = matcher.group(1);
       String rawParentId = matcher.group(2);
@@ -218,7 +223,7 @@ public class CommandRouter {
       }
       Interval targetInterval;
       if (flagMatcher.group(1) != null) {
-        targetInterval = new Interval("CUSTOM_EXPR", flagMatcher.group(1).replaceAll("\\s+", ""));
+        targetInterval = new Interval("CUSTOM_EXPR", flagMatcher.group(1).replaceAll(" +", ""));
       } else {
         targetInterval = Interval.fromAlias(flagMatcher.group(2));
         if (targetInterval == null) {
@@ -276,7 +281,7 @@ public class CommandRouter {
       Map<String, Double> freqs = s.computeFrequencies();
       double frequency = freqs.getOrDefault(node.getId(), 0.0);
       ui.printToTerminal(String.format("[Audio Engine] Auditioning Node %s -> %.2f Hz", node.getId(), frequency));
-      AudioSynthesizerEngine.playFrequencies(List.of(frequency), 60.0 / s.getBpm());
+      AudioSynthesizerEngine.playFrequencies(List.of(frequency), 60.0 / s.getBpm(), s.getActiveWaveform());
     }));
     registry.add(new RegisteredRoute("^play\\s+-chord\\s+([a-zA-Z0-9_]+)$", "play -chord ", "Auditions a single specific Chord block directly utilizing its assigned duration.", (input, matcher, s, h, ui) -> {
       String chordId = matcher.group(1);
@@ -311,7 +316,7 @@ public class CommandRouter {
     registry.add(new RegisteredRoute("^play$", "play", "Plays the entire composition score timeline from the beginning respecting BPM rules.", (input, matcher, s, h, ui) -> {
       List<Song.Chord> allChords = s.getChords();
       if (allChords.isEmpty()) {
-        ui.printToTerminal("[Audio Warning] Score layout is empty.");
+        ui.printToTerminal("[Audio Warning] Score is empty.");
         return;
       }
       for (Song.Chord c : allChords) playSingleChordInstance(c, s);
@@ -321,31 +326,32 @@ public class CommandRouter {
 
   private void playSingleChordInstance(Song.Chord chord, Song currentSong) {
     Map<String, Double> activeFreqs = currentSong.computeFrequencies();
-    List<Double> chordFrequenciesCluster = new ArrayList<>();
+    List chordFrequenciesCluster = new ArrayList<>();
     chordFrequenciesCluster.add(activeFreqs.getOrDefault(chord.getRootNode().getId(), 0.0));
     for (Song.HarmonicNode overtone : chord.getOvertones()) {
       chordFrequenciesCluster.add(activeFreqs.getOrDefault(overtone.getId(), 0.0));
     }
     double secondsPerBeat = 60.0 / currentSong.getBpm();
     double chordDurationInSeconds = secondsPerBeat * chord.getDuration().beatsValue();
-    AudioSynthesizerEngine.playFrequencies(chordFrequenciesCluster, chordDurationInSeconds);
-  }
+    AudioSynthesizerEngine.playFrequencies(chordFrequenciesCluster, chordDurationInSeconds, currentSong.getActiveWaveform());
+  }// --- FIX: CONSUMING THE UNIFIED NATIVE JAVA RECORD ACCESSORS STYLE METHOD SIGNATURES (.pattern(), .action()...) ---
 
   public boolean isRootCommand(String input) {
     String trimmed = input.trim();
     for (RegisteredRoute route : registry) {
-      if (route.pattern().matcher(trimmed).matches()) return true;
+      if (route.pattern().matcher(trimmed).matches())
+        return true; // FIXED: .pattern() native record accessor
     }
     String lower = trimmed.toLowerCase();
     return lower.equals("cancel") || lower.equals("exit") || lower.equals("quit");
   }
 
-  public void handleCommand(String rawCommandLine) throws FlowContext.ExitException, FlowContext.CancelException, FlowContext.CancelException {
+  public void handleCommand(String rawCommandLine) throws FlowContext.ExitException, FlowContext.CancelException {
     String trimmed = rawCommandLine.trim();
     for (RegisteredRoute route : registry) {
-      Matcher matcher = route.pattern().matcher(trimmed);
+      Matcher matcher = route.pattern().matcher(trimmed); // FIXED: .pattern() native record accessor
       if (matcher.matches()) {
-        route.action().ActionExecutor(trimmed, matcher, song, historyManager, uiWindow);
+        route.action().ActionExecutor(trimmed, matcher, song, historyManager, uiWindow); // FIXED: .action() native record accessor
         return;
       }
     }
@@ -395,7 +401,7 @@ public class CommandRouter {
 
   private void printHelp() {
     uiWindow.printToTerminal("\n=== Interactive CLI Studio Matrix Dynamic Help ===");
-    for (RegisteredRoute route : registry) {
+    for (RegisteredRoute route : registry) {// FIXED: .syntaxHelp() and .descriptionHelp() native record accessors
       uiWindow.printToTerminal(String.format(" -> %-45s %s", route.syntaxHelp(), route.descriptionHelp()));
     }
     uiWindow.printToTerminal(String.format(" -> %-45s %s", "cancel", "Aborts current active sequence flow immediately."));

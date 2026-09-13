@@ -6,13 +6,16 @@ import javax.sound.sampled.SourceDataLine;
 import java.util.List;
 
 public class AudioSynthesizerEngine {
-  private static final int SAMPLE_RATE = 44100; // Standard CD Audio Quality Sampling Rate
+  private static final int SAMPLE_RATE = 44100;
+
+  public enum Waveform {
+    SINE, SQUARE, SAWTOOTH, TRIANGLE
+  }
 
   /**
-   * Renders and streams pure sine waves for a group of frequencies simultaneously.
-   * Uses automatic attenuation to prevent digital clipping and safe exponential math.
+   * Synthesizes and streams multiple frequencies simultaneously using advanced wave synthesis models.
    */
-  public static void playFrequencies(List<Double> frequencies, double durationInSeconds) {
+  public static void playFrequencies(List<Double> frequencies, double durationInSeconds, Waveform waveform) {
     if (frequencies == null || frequencies.isEmpty() || durationInSeconds <= 0) return;
 
     AudioFormat format = new AudioFormat(SAMPLE_RATE, 16, 1, true, true);
@@ -24,50 +27,72 @@ public class AudioSynthesizerEngine {
       byte[] buffer = new byte[1024];
       int bufferIdx = 0;
 
-      // Amplitude envelope parameters to eliminate pops/clicks (5ms ramp)
-      int fadeSamples = (int) (SAMPLE_RATE * 0.005);
-      if (fadeSamples * 2 > totalSamples) {
-        fadeSamples = totalSamples / 2;
-      }
+      int fadeSamples = (int) (SAMPLE_RATE * 0.005); // 5ms anti-click ramp
+      if (fadeSamples * 2 > totalSamples) fadeSamples = totalSamples / 2;
 
       for (int sample = 0; sample < totalSamples; sample++) {
         double time = (double) sample / SAMPLE_RATE;
         double combinedWave = 0.0;
 
-        // Polyphonic Additive Synthesis Mix
         for (double freq : frequencies) {
-          if (freq > 0) {
-            combinedWave += Math.sin(2.0 * Math.PI * freq * time);
+          if (freq <= 0) continue;
+
+          // Core math cycle calculation for periodic synthesis [0.0, 1.0]
+          double cycle = (time * freq) % 1.0;
+
+          switch (waveform) {
+            case SQUARE:
+              // High state (+1) for first half of cycle, Low state (-1) for second half
+              combinedWave += (cycle < 0.5) ? 1.0 : -1.0;
+              break;
+
+            case SAWTOOTH:
+              // Linear ramp from -1.0 to +1.0 across the entire cycle period
+              combinedWave += 2.0 * cycle - 1.0;
+              break;
+
+            case TRIANGLE:
+              // Double linear ramp rising and falling smoothly
+              if (cycle < 0.25) {
+                combinedWave += 4.0 * cycle;
+              } else if (cycle < 0.75) {
+                combinedWave += 2.0 - 4.0 * cycle;
+              } else {
+                combinedWave += 4.0 * cycle - 4.0;
+              }
+              break;
+
+            case SINE:
+            default:
+              // Standard pure harmonic sinusoidal wave mathematical function
+              combinedWave += Math.sin(2.0 * Math.PI * freq * time);
+              break;
           }
         }
 
-        // Attenuate volume dynamically by the total number of notes to avoid digital clipping
+        // Attenuation mix to block structural digital clipping overflow
         combinedWave /= frequencies.size();
 
-        // Apply Amplitude Attack/Release Envelope (Fade-In / Fade-Out)
+        // Anti-pop linear attack/release tracking
         double envelope = 1.0;
         if (sample < fadeSamples) {
-          envelope = (double) sample / fadeSamples; // Linear Attack Ramp
+          envelope = (double) sample / fadeSamples;
         } else if (sample > totalSamples - fadeSamples) {
-          envelope = (double) (totalSamples - sample) / fadeSamples; // Linear Release Ramp
+          envelope = (double) (totalSamples - sample) / fadeSamples;
         }
         combinedWave *= envelope;
 
-        // Scale float wave [-1.0, 1.0] onto signed 16-bit PCM short integer boundary
         short pcmValue = (short) (combinedWave * Short.MAX_VALUE);
 
-        // Write into byte buffer array (Big Endian serialization layout matching format)
         buffer[bufferIdx++] = (byte) ((pcmValue >> 8) & 0xFF);
         buffer[bufferIdx++] = (byte) (pcmValue & 0xFF);
 
-        // Flush buffer block chunk onto the hardware mixer line stream whenever full
         if (bufferIdx >= buffer.length) {
           line.write(buffer, 0, bufferIdx);
           bufferIdx = 0;
         }
       }
 
-      // Flush remaining trailing sample elements
       if (bufferIdx > 0) {
         line.write(buffer, 0, bufferIdx);
       }
@@ -75,7 +100,7 @@ public class AudioSynthesizerEngine {
       line.drain();
       line.stop();
     } catch (Exception e) {
-      System.err.println("[Audio Hardware Engine Exception] " + e.getMessage());
+      System.err.println("[Audio Engine Exception] Synthesis stream line failure: " + e.getMessage());
     }
   }
 }

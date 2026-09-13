@@ -1,6 +1,5 @@
 package org.intervalica.infrastructure.ui;
 
-
 import org.intervalica.core.domain.model.CommandHistoryManager;
 import org.intervalica.core.domain.model.Song;
 import org.intervalica.core.usecase.base.FlowContext;
@@ -15,7 +14,6 @@ import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 
 public class SongMonitorWindow extends JFrame {
-  // Score Header Components
   private final JLabel titleLabel;
   private final JLabel authorLabel;
   private final JLabel bpmLabel;
@@ -29,10 +27,9 @@ public class SongMonitorWindow extends JFrame {
   private final CommandRouter router;
   private final LinkedBlockingQueue<String> inputQueue = new LinkedBlockingQueue<>();
 
-  // --- NEW: UI TERMINAL COMMAND HISTORY TRACKING ---
   private final List<String> commandHistory = new ArrayList<>();
   private int historyPointer = -1;
-  // --------------------------------------------------
+  private volatile boolean isWorkspaceRunning = true;
 
   public SongMonitorWindow(Song song, CommandHistoryManager historyManager) {
     this.observedSong = song;
@@ -103,54 +100,46 @@ public class SongMonitorWindow extends JFrame {
       BorderFactory.createEmptyBorder(5, 5, 5, 5)
     ));
 
-    // Command Submission Event Logic (Now with filtering)
     commandInputField.addActionListener(e -> {
-      String text = commandInputField.getText().trim();
-      if (!text.isEmpty()) {
-        printToTerminal("> " + text);
+      String text = commandInputField.getText();
+      if (text.isEmpty() || text.isBlank()) {
+        printToTerminal("> [Default/Empty]");
+        inputQueue.offer("");
+      } else {
+        String trimmedText = text.trim();
+        printToTerminal("> " + trimmedText);
 
-        // --- NEW FILTER CRITERIA: ONLY STORE SYSTEM ROOT COMMANDS ---
-        if (router.isRootCommand(text)) {
-          // Prevent consecutive duplicates in the history
-          if (commandHistory.isEmpty() || !commandHistory.getLast().equals(text)) {
-            commandHistory.add(text);
+        if (router.isRootCommand(trimmedText)) {
+          if (commandHistory.isEmpty() || !commandHistory.get(commandHistory.size() - 1).equals(trimmedText)) {
+            commandHistory.add(trimmedText);
           }
         }
-        historyPointer = commandHistory.size(); // Always reset pointer position
-        // -------------------------------------------------------------
-
-        inputQueue.offer(text);
-        commandInputField.setText("");
+        historyPointer = commandHistory.size();
+        inputQueue.offer(trimmedText);
       }
+      commandInputField.setText("");
     });
 
-
-    // --- NEW: KEYBOARD NAVIGATION INTERCEPTOR (UP / DOWN ARROWS) ---
     commandInputField.addKeyListener(new KeyAdapter() {
       @Override
       public void keyPressed(KeyEvent e) {
         if (commandHistory.isEmpty()) return;
-
         if (e.getKeyCode() == KeyEvent.VK_UP) {
-          // Navigate backwards through previous configurations
           if (historyPointer > 0) {
             historyPointer--;
             commandInputField.setText(commandHistory.get(historyPointer));
           }
         } else if (e.getKeyCode() == KeyEvent.VK_DOWN) {
-          // Navigate forwards towards recent instructions
           if (historyPointer < commandHistory.size() - 1) {
             historyPointer++;
             commandInputField.setText(commandHistory.get(historyPointer));
           } else {
-            // Beyond the last command: wipe string layout to blank state
             historyPointer = commandHistory.size();
             commandInputField.setText("");
           }
         }
       }
     });
-    // ----------------------------------------------------------------
 
     JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, songScrollPane, terminalScrollPane);
     splitPane.setDividerLocation(200);
@@ -172,8 +161,7 @@ public class SongMonitorWindow extends JFrame {
     refreshSongView();
 
     printToTerminal("Workspace initialization successful.");
-    printToTerminal("Type 'help' to examine available command systems.");
-    printToTerminal("Use UP and DOWN arrow keys to scroll through previously typed commands.\n");
+    printToTerminal("Type 'help' to examine available command systems.\n");
 
     Thread.startVirtualThread(this::startCliLoop);
   }
@@ -183,7 +171,11 @@ public class SongMonitorWindow extends JFrame {
       titleLabel.setText("Title: " + observedSong.getTitle());
       authorLabel.setText("Composer: " + observedSong.getAuthor());
       bpmLabel.setText("Tempo: " + observedSong.getBpm() + " BPM");
-      freqLabel.setText("Ref Freq: " + observedSong.getReferenceFrequency() + " Hz");
+
+      // --- UPDATED VISUAL FEEDBACK: RENDERS WAVEFORM CONTEXT IN GREY HEADER PANEL ---
+      freqLabel.setText(String.format("Ref Freq: %.1f Hz | Wave: [%s]",
+        observedSong.getReferenceFrequency(), observedSong.getActiveWaveform().name()));
+
       songStructureArea.setText(observedSong.toString());
     });
   }
@@ -213,22 +205,17 @@ public class SongMonitorWindow extends JFrame {
     }
   }
 
-  // NEW: Boolean control state flag to govern the virtual thread lifecycle cleanly
-  private volatile boolean isWorkspaceRunning = true;
-
   private void startCliLoop() {
     while (isWorkspaceRunning) {
       try {
         String input = readInputFromUI();
         router.handleCommand(input);
       } catch (FlowContext.CancelException e) {
-        // Swallow local sequence breaks and keep looping smoothly
+        // Swallow local sequence breaks
       } catch (FlowContext.ExitException e) {
-        // FIXED: Standard flow termination request caught. Soft mutate state instead of hard breaks.
         isWorkspaceRunning = false;
       }
     }
-    // Graceful termination out of the loop boundary channel
     System.exit(0);
   }
 }
