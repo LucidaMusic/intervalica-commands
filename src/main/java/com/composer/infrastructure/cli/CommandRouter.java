@@ -1,7 +1,8 @@
 package src.main.java.com.composer.infrastructure.cli;
 
-import src.main.java.com.composer.core.domain.model.CommandHistoryManager;
-import src.main.java.com.composer.core.domain.model.Song;
+import src.main.java.com.composer.core.domain.model.*;
+import src.main.java.com.composer.core.domain.types.Duration;
+import src.main.java.com.composer.core.domain.types.Interval;
 import src.main.java.com.composer.core.usecase.base.FlowContext;
 import src.main.java.com.composer.core.usecase.impl.AddChordFlow;
 import src.main.java.com.composer.infrastructure.audio.AudioSynthesizerEngine;
@@ -14,12 +15,19 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class CommandRouter {
   private final List<RegisteredRoute> registry = new ArrayList<>();
   private final Song song;
   private final CommandHistoryManager historyManager;
   private final SongMonitorWindow uiWindow;
+
+  // Compiled micro-pattern to process unified node flag mutations inline
+  private static final Pattern SPEC_MODIFIER_PATTERN = Pattern.compile(
+    "^(?:-custom\\s+\"([^\"]+)\"|([^\\s-]+))(?:\\s+-oct\\s+([+-]?\\d+))?(?:\\s+(-inv))?$",
+    Pattern.CASE_INSENSITIVE
+  );
 
   public CommandRouter(Song song, CommandHistoryManager historyManager, SongMonitorWindow uiWindow) {
     this.song = song;
@@ -29,28 +37,158 @@ public class CommandRouter {
   }
 
   private void registerSystemRoutes() {
-    // 1. Core Structural Pipeline Flows
+    // Core Creation Pipeline Flows
     registry.add(new RegisteredRoute(
-      "^add[- ]chord(?:\\s+-name\\s+\"([^\"]+)\")?(?:\\s+(\\d+))?$",
-      "add-chord -name \"<alias>\" <count>",
+      "^add[- ]chord(?:\\s+-name\\s+\"([^\"]+)\")?(?:\\s+(\\d+))?$", "add-chord -name \"<alias>\" <count>",
       "Launches composition flow with an optional name tag shortcut option.",
       (input, matcher, s, h, ui) -> new AddChordFlow(h, ui, matcher.group(1)).execute(s, matcher.group(2))
     ));
 
-    // 2. Timeline Commands
+    // --- NEW CHANNELS: SECURE REFACTORED GRAPH ALTERATION MATRIX ---
+
+    // OPERATION A: Secure Deletion Checker (remove-chord C1)
+    registry.add(new RegisteredRoute(
+      "^remove[- ]chord\\s+([a-zA-Z0-9_]+)$", "remove-chord <chord-id>", "Deletes an entire chord block if no subsequent nodes depend on it.",
+      (input, matcher, s, h, ui) -> {
+        String targetId = matcher.group(1).trim();
+        Song.Chord targetChord = s.findChordById(targetId);
+        if (targetChord == null) {
+          ui.printToTerminal("[Error] Chord ID not found.");
+          return;
+        }
+
+        // Integrity Scan
+        List<String> blocks = s.verifyDeletionSafety(targetId);
+        if (!blocks.isEmpty()) {
+          ui.printToTerminal(String.format("[BLOCKING ERROR] Cannot delete %s. The following subsequent nodes rely on its frequencies: %s", targetId, blocks));
+          return;
+        }
+
+        RemoveChordCommand cmd = new RemoveChordCommand(s, targetChord);
+        h.executeCommand(cmd);
+        ui.printToTerminal(String.format("[Success] Chord %s deleted safely and pushed into history.", targetId));
+      }
+    ));
+
+    // OPERATION B: Chord Aesthetic Modifier (edit-chord C1 -name "New Name" -duration 8th)
+    registry.add(new RegisteredRoute(
+      "^edit[- ]chord\\s+([a-zA-Z0-9_]+)(?:\\s+-name\\s+\"([^\"]+)\")?(?:\\s+-duration\\s+([^\\s]+))?$",
+      "edit-chord <chord-id> -name \"<text>\" -duration <alias>", "Edits descriptive metadata fields of an existing chord safely.",
+      (input, matcher, s, h, ui) -> {
+        String id = matcher.group(1);
+        Song.Chord chord = s.findChordById(id);
+        if (chord == null) {
+          ui.printToTerminal("[Error] Chord not found.");
+          return;
+        }
+
+        String targetName = (matcher.group(2) != null) ? matcher.group(2) : chord.getName();
+        Duration targetDur = chord.getDuration();
+        if (matcher.group(3) != null) {
+          Duration resolved = Duration.fromAlias(matcher.group(3));
+          if (resolved == null) {
+            ui.printToTerminal("[Error] Duration token unregistered.");
+            return;
+          }
+          targetDur = resolved;
+        }
+
+        EditChordCommand cmd = new EditChordCommand(chord, targetName, targetDur);
+        h.executeCommand(cmd);
+        ui.printToTerminal(String.format("[Success] Chord %s properties modified successfully.", id));
+      }
+    ));
+
+    // OPERATION C: Advanced Microtonal Node Morphing (edit-node T2 -ref T1 -int 5j -oct +1)
+    // Matches target node ID followed by string modifiers block flag parameters
+    registry.add(new RegisteredRoute(
+      "^edit[- ]node\\s+([a-zA-Z0-9_]+)\\s+-ref\\s+([^\\s]+)\\s+-properties\\s+(.+)$",
+      "edit-node <node-id> -ref <parent-id> -properties <spec-flags>", "Mutates node wiring vectors checking directional chronological integrity.",
+      (input, matcher, s, h, ui) -> {
+        String targetNodeId = matcher.group(1);
+        String rawParentId = matcher.group(2);
+        String flagsBlock = matcher.group(3).trim();
+
+        Song.HarmonicNode node = s.findNodeById(targetNodeId);
+        if (node == null) {
+          ui.printToTerminal("[Error] Target Node ID not found.");
+          return;
+        }
+
+        // Chronological Constraint Verification Rules
+        String finalParentId = rawParentId.equalsIgnoreCase("BASE") ? null : rawParentId;
+        if (finalParentId != null) {
+          Song.HarmonicNode testParent = s.findNodeById(finalParentId);
+          if (testParent == null) {
+            ui.printToTerminal("[Error] Parent anchor ID does not exist.");
+            return;
+          }
+
+          // Root tonic nodes cannot reference nodes sitting on future timeline frames
+          if (node.getLabel().equals("ROOT")) {
+            String currentChordId = "C" + targetNodeId.replaceAll("\\D+", "");
+            int currentChordChronologicalPos = s.getChordChronologicalIndex(currentChordId);
+
+            // Find which chord owns the parent node
+            String parentChordId = "C" + finalParentId.replaceAll("\\D+", "");
+            int parentChordChronologicalPos = s.getChordChronologicalIndex(parentChordId);
+
+            if (parentChordChronologicalPos >= currentChordChronologicalPos) {
+              ui.printToTerminal("[INTEGRITY ERROR] Chronological Violation: A Tonic node can ONLY anchor to parent nodes living inside PREVIOUS chords.");
+              return;
+            }
+          } else {
+            // Overtones always point to their own local tonic to keep chord cohesion
+            if (!finalParentId.equalsIgnoreCase("T" + targetNodeId.replaceAll("^O(\\d+)_\\d+$", "$1"))) {
+              ui.printToTerminal("[INTEGRITY WARNING] Overtones are bounded by harmonic layout architecture to reference their own internal local Tonic node.");
+              return;
+            }
+          }
+        }
+
+        // Parse property flag configurations
+        Matcher flagMatcher = SPEC_MODIFIER_PATTERN.matcher(flagsBlock);
+        if (!flagMatcher.matches()) {
+          ui.printToTerminal("[Error] Malformed property specs flag tokens syntax layout.");
+          return;
+        }
+
+        Interval targetInterval;
+        if (flagMatcher.group(1) != null) {
+          targetInterval = new Interval("CUSTOM_EXPR", flagMatcher.group(1).replaceAll("\\s+", ""));
+        } else {
+          targetInterval = Interval.fromAlias(flagMatcher.group(2));
+          if (targetInterval == null) {
+            ui.printToTerminal("[Error] Mnemonic interval alias unrecognized.");
+            return;
+          }
+        }
+
+        int octave = 0;
+        if (flagMatcher.group(3) != null) {
+          String tok = flagMatcher.group(3);
+          octave = Integer.parseInt(tok.startsWith("+") ? tok.substring(1) : tok);
+        }
+        boolean inv = (flagMatcher.group(4) != null);
+
+        EditNodeCommand cmd = new EditNodeCommand(node, finalParentId, targetInterval, octave, inv);
+        h.executeCommand(cmd);
+        ui.printToTerminal(String.format("[Success] Node %s cascading vectors recalculated perfectly.", targetNodeId));
+      }
+    ));
+
+    // Baseline Utilities
     registry.add(new RegisteredRoute("^undo$", "undo", "Reverts last committed modifications.", (input, matcher, s, h, ui) -> h.undo(ui)));
     registry.add(new RegisteredRoute("^redo$", "redo", "Re-applies reverted sequence.", (input, matcher, s, h, ui) -> h.redo(ui)));
-
-    // 3. Metadata Configuration Engine
     registry.add(new RegisteredRoute("^set-title\\s+(.+)$", "set-title <text>", "Updates the score title metadata.", (input, matcher, s, h, ui) -> {
       s.setTitle(matcher.group(1).trim());
       ui.printToTerminal("[Metadata] Title set successfully.");
     }));
-    registry.add(new RegisteredRoute("^set-author\\s+(.+)$", "set-author <text>", "Updates the score composer name.", (input, matcher, s, h, ui) -> {
+    registry.add(new RegisteredRoute("^set-author\\s+(.+)$", "set-author ", "Updates the score composer name.", (input, matcher, s, h, ui) -> {
       s.setAuthor(matcher.group(1).trim());
       ui.printToTerminal("[Metadata] Composer author set successfully.");
     }));
-    registry.add(new RegisteredRoute("^set-bpm\\s+(\\d+)$", "set-bpm <integer>", "Changes the musical playback tempo profile.", (input, matcher, s, h, ui) -> {
+    registry.add(new RegisteredRoute("^set-bpm\\s+(\\d+)$", "set-bpm ", "Changes the musical playback tempo profile.", (input, matcher, s, h, ui) -> {
       int val = Integer.parseInt(matcher.group(1));
       if (val <= 0) {
         ui.printToTerminal("[Error] BPM must be greater than 0.");
@@ -59,7 +197,7 @@ public class CommandRouter {
       s.setBpm(val);
       ui.printToTerminal("[Metadata] Tempo updated to " + val + " BPM.");
     }));
-    registry.add(new RegisteredRoute("^set-freq\\s+(\\d+(?:\\.\\d+)?)$", "set-freq <decimal>", "Alters the baseline reference frequency tuning anchor.", (input, matcher, s, h, ui) -> {
+    registry.add(new RegisteredRoute("^set-freq\\s+(\\d+(?:\\.\\d+)?)$", "set-freq ", "Alters the baseline reference frequency tuning anchor.", (input, matcher, s, h, ui) -> {
       double val = Double.parseDouble(matcher.group(1));
       if (val <= 0) {
         ui.printToTerminal("[Error] Frequency must be greater than 0.");
@@ -68,101 +206,61 @@ public class CommandRouter {
       s.setReferenceFrequency(val);
       ui.printToTerminal("[Metadata] Reference base frequency tuning set to " + val + " Hz.");
     }));
-
-    // 4. State Persistence Engine
     registry.add(new RegisteredRoute("^save$", "save", "Opens native dialogue window to serialize current score directly to disk.", (input, matcher, s, h, ui) -> handleNativeSave()));
-    registry.add(new RegisteredRoute("^load$", "load", "Opens native dialogue window to deserialize and populate workspace session.", (input, matcher, s, h, ui) -> handleNativeLoad()));
-
-    // --- NEW CHANNELS: MULTI-OPTION PLAYBACK AUDIO SYNTHESIZER ROUTING BLOCKS ---
-
-    // ROUTE A: Play specific isolated node footprint (play -node T1, play -node O1_1)
-    registry.add(new RegisteredRoute(
-      "^play\\s+-node\\s+([a-zA-Z0-9_]+)$", "play -node <id>", "Auditions a single specific node (Tonic or Overtone) during 1 beat.",
-      (input, matcher, s, h, ui) -> {
-        String nodeId = matcher.group(1);
-        Song.HarmonicNode node = s.findNodeById(nodeId);
-        if (node == null) {
-          ui.printToTerminal("[Audio Error] Target Node ID not found in graph matrix.");
-          return;
-        }
-        Map<String, Double> freqs = s.computeFrequencies();
-        double frequency = freqs.getOrDefault(node.getId(), 0.0);
-        ui.printToTerminal(String.format("[Audio Engine] Auditioning isolated Node %s -> %.2f Hz (1 Beat)", node.getId(), frequency));
-        double secondsPerBeat = 60.0 / s.getBpm();
-        AudioSynthesizerEngine.playFrequencies(List.of(frequency), secondsPerBeat);
+    registry.add(new RegisteredRoute("^load$", "load", "Opens native dialogue window to deserialize and populate workspace session.", (input, matcher, s, h, ui) -> handleNativeLoad()));// Playback Engine Vectors
+    registry.add(new RegisteredRoute("^play\\s+-node\\s+([a-zA-Z0-9_]+)$", "play -node ", "Auditions a single specific node (Tonic or Overtone) during 1 beat.", (input, matcher, s, h, ui) -> {
+      String nodeId = matcher.group(1);
+      Song.HarmonicNode node = s.findNodeById(nodeId);
+      if (node == null) {
+        ui.printToTerminal("[Audio Error] Target Node ID not found.");
+        return;
       }
-    ));
-
-    // ROUTE B: Play specific isolated chord blueprint block (play -chord C1)
-    registry.add(new RegisteredRoute(
-      "^play\\s+-chord\\s+([a-zA-Z0-9_]+)$", "play -chord <id>", "Auditions a single specific Chord block directly utilizing its assigned duration.",
-      (input, matcher, s, h, ui) -> {
-        String chordId = matcher.group(1);
-        Song.Chord targetChord = null;
-        for (Song.Chord c : s.getChords()) {
-          if (c.getChordId().equalsIgnoreCase(chordId)) {
-            targetChord = c;
-            break;
-          }
+      Map<String, Double> freqs = s.computeFrequencies();
+      double frequency = freqs.getOrDefault(node.getId(), 0.0);
+      ui.printToTerminal(String.format("[Audio Engine] Auditioning Node %s -> %.2f Hz", node.getId(), frequency));
+      AudioSynthesizerEngine.playFrequencies(List.of(frequency), 60.0 / s.getBpm());
+    }));
+    registry.add(new RegisteredRoute("^play\\s+-chord\\s+([a-zA-Z0-9_]+)$", "play -chord ", "Auditions a single specific Chord block directly utilizing its assigned duration.", (input, matcher, s, h, ui) -> {
+      String chordId = matcher.group(1);
+      Song.Chord targetChord = null;
+      for (Song.Chord c : s.getChords()) {
+        if (c.getChordId().equalsIgnoreCase(chordId)) {
+          targetChord = c;
+          break;
         }
-        if (targetChord == null) {
-          ui.printToTerminal("[Audio Error] Target Chord ID not found.");
-          return;
-        }
-        ui.printToTerminal(String.format("[Audio Engine] Auditioning isolated Chord %s (\"%s\")", targetChord.getChordId(), targetChord.getName()));
-        playSingleChordInstance(targetChord, s);
       }
-    ));
-
-    // ROUTE C: Play a custom bounded fragment range sequence (play -range C1 C3)
-    registry.add(new RegisteredRoute(
-      "^play\\s+-range\\s+([a-zA-Z0-9_]+)\\s+([a-zA-Z0-9_]+)$", "play -range <start-id> <end-id>", "Plays a specific subsection fragment of the score.",
-      (input, matcher, s, h, ui) -> {
-        String startId = matcher.group(1);
-        String endId = matcher.group(2);
-        List<Song.Chord> allChords = s.getChords();
-        int startIdx = -1, endIdx = -1;
-        for (int i = 0; i < allChords.size(); i++) {
-          if (allChords.get(i).getChordId().equalsIgnoreCase(startId)) startIdx = i;
-          if (allChords.get(i).getChordId().equalsIgnoreCase(endId)) endIdx = i;
-        }
-        if (startIdx == -1 || endIdx == -1 || startIdx > endIdx) {
-          ui.printToTerminal("[Audio Error] Invalid subset selection metrics boundary range specified.");
-          return;
-        }
-        ui.printToTerminal(String.format("[Audio Engine] Stream playback started for Range [%s -> %s]...", startId, endId));
-        for (int i = startIdx; i <= endIdx; i++) {
-          playSingleChordInstance(allChords.get(i), s);
-        }
-        ui.printToTerminal("[Audio Engine] Range subsection stream completed.");
+      if (targetChord == null) {
+        ui.printToTerminal("[Audio Error] Chord ID not found.");
+        return;
       }
-    ));
-
-    // ROUTE D: Play the entire structural macro song graph network from scratch (play)
-    registry.add(new RegisteredRoute(
-      "^play$", "play", "Plays the entire composition score timeline from the beginning respecting BPM rules.",
-      (input, matcher, s, h, ui) -> {
-        List<Song.Chord> allChords = s.getChords();
-        if (allChords.isEmpty()) {
-          ui.printToTerminal("[Audio Warning] Score layout is completely empty. Add chords first.");
-          return;
-        }
-        ui.printToTerminal(String.format("[Audio Engine] Initializing playback thread for entire score timeline: \"%s\"...", s.getTitle()));
-        for (Song.Chord c : allChords) {
-          playSingleChordInstance(c, s);
-        }
-        ui.printToTerminal("[Audio Engine] Complete playback score timeline finished.");
+      playSingleChordInstance(targetChord, s);
+    }));
+    registry.add(new RegisteredRoute("^play\\s+-range\\s+([a-zA-Z0-9_]+)\\s+([a-zA-Z0-9_]+)$", "play -range  ", "Plays a specific subsection fragment of the score.", (input, matcher, s, h, ui) -> {
+      String startId = matcher.group(1);
+      String endId = matcher.group(2);
+      List<Song.Chord> allChords = s.getChords();
+      int startIdx = -1, endIdx = -1;
+      for (int i = 0; i < allChords.size(); i++) {
+        if (allChords.get(i).getChordId().equalsIgnoreCase(startId)) startIdx = i;
+        if (allChords.get(i).getChordId().equalsIgnoreCase(endId)) endIdx = i;
       }
-    ));
-
-    // 5. General Utilities
+      if (startIdx == -1 || endIdx == -1 || startIdx > endIdx) {
+        ui.printToTerminal("[Audio Error] Invalid boundary range.");
+        return;
+      }
+      for (int i = startIdx; i <= endIdx; i++) playSingleChordInstance(allChords.get(i), s);
+    }));
+    registry.add(new RegisteredRoute("^play$", "play", "Plays the entire composition score timeline from the beginning respecting BPM rules.", (input, matcher, s, h, ui) -> {
+      List<Song.Chord> allChords = s.getChords();
+      if (allChords.isEmpty()) {
+        ui.printToTerminal("[Audio Warning] Score layout is empty.");
+        return;
+      }
+      for (Song.Chord c : allChords) playSingleChordInstance(c, s);
+    }));
     registry.add(new RegisteredRoute("^help$", "help", "Generates this interactive routing matrix menu dynamically.", (input, matcher, s, h, ui) -> printHelp()));
   }
 
-  /**
-   * PRIVATE AUDIO UTILITY HELPER
-   * Extracts exact active node child cluster frequencies, maps time calculations, and triggers audio lines.
-   */
   private void playSingleChordInstance(Song.Chord chord, Song currentSong) {
     Map<String, Double> activeFreqs = currentSong.computeFrequencies();
     List<Double> chordFrequenciesCluster = new ArrayList<>();
@@ -192,7 +290,7 @@ public class CommandRouter {
     return lower.equals("cancel") || lower.equals("exit") || lower.equals("quit");
   }
 
-  public void handleCommand(String rawCommandLine) throws FlowContext.ExitException, FlowContext.CancelException {
+  public void handleCommand(String rawCommandLine) throws FlowContext.ExitException, FlowContext.CancelException, FlowContext.CancelException {
     String trimmed = rawCommandLine.trim();
     for (RegisteredRoute route : registry) {
       Matcher matcher = route.getPattern().matcher(trimmed);
@@ -248,10 +346,10 @@ public class CommandRouter {
   private void printHelp() {
     uiWindow.printToTerminal("\n=== Interactive CLI Studio Matrix Dynamic Help ===");
     for (RegisteredRoute route : registry) {
-      uiWindow.printToTerminal(String.format(" -> %-40s %s", route.getSyntaxHelp(), route.getDescriptionHelp()));
+      uiWindow.printToTerminal(String.format(" -> %-45s %s", route.getSyntaxHelp(), route.getDescriptionHelp()));
     }
-    uiWindow.printToTerminal(String.format(" -> %-40s %s", "cancel", "Aborts current active sequence flow immediately."));
-    uiWindow.printToTerminal(String.format(" -> %-40s %s", "exit / quit", "Terminates application execution context cleanly."));
+    uiWindow.printToTerminal(String.format(" -> %-45s %s", "cancel", "Aborts current active sequence flow immediately."));
+    uiWindow.printToTerminal(String.format(" -> %-45s %s", "exit / quit", "Terminates application execution context cleanly."));
     uiWindow.printToTerminal("===================================================\n");
   }
 }
