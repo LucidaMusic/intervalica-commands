@@ -2,8 +2,6 @@ package src.main.java.com.composer.core.domain.model;
 
 import src.main.java.com.composer.core.domain.types.Duration;
 import src.main.java.com.composer.core.domain.types.Interval;
-
-import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -11,15 +9,15 @@ import java.util.List;
 import java.util.Map;
 
 public class Song implements Serializable {
-    private static final long serialVersionUID = 4L; // Updated blueprint signature version
+    private static final long serialVersionUID = 5L; // Incremented tracker layout signature version
 
     public static class HarmonicNode implements Serializable {
         private static final long serialVersionUID = 2L;
         private final String id;
         private final String parentId;
         private final Interval interval;
-        private final int octaveShift;  // NEW: Integer tracking (+2, -1, 0...)
-        private final boolean inverted; // NEW: Boolean flag for interval inversion inversion (-inv)
+        private final int octaveShift;
+        private final boolean inverted;
         private final String label;
 
         public HarmonicNode(String id, String parentId, Interval interval, int octaveShift, boolean inverted, String label) {
@@ -40,13 +38,12 @@ public class Song implements Serializable {
     }
 
     public static class Chord implements Serializable {
-        @Serial
-        private static final long serialVersionUID = 3L;
+        private static final long serialVersionUID = 4L; // Updated
         private final String chordId;
         private final String name;
         private final HarmonicNode rootNode;
         private final List<HarmonicNode> overtones = new ArrayList<>();
-        private final Duration duration;
+        private final Duration duration; // Now points to the rich duration class layout object
 
         public Chord(String chordId, String name, HarmonicNode rootNode, Duration duration) {
             this.chordId = chordId;
@@ -62,7 +59,7 @@ public class Song implements Serializable {
         public Duration getDuration() { return duration; }
     }
 
-    private String title = "Advanced Multi-Dimensional Score Blueprint";
+    private String title = "Advanced Proportional Score Blueprint";
     private String author = "Graph Composer Expert";
     private int bpm = 120;
     private double referenceFrequency = 440.0;
@@ -107,10 +104,6 @@ public class Song implements Serializable {
         return calculated;
     }
 
-    /**
-     * CORE CALCULATION ENGINE (UPDATED MULTI-DIMENSIONAL LOGIC)
-     * Dynamically processes: Base Ratio * Inversion Rules * Octave Shifting Coefficients
-     */
     private void resolveNodeFrequency(HarmonicNode node, Map<String, Double> cache) {
         if (cache.containsKey(node.getId())) return;
 
@@ -127,20 +120,11 @@ public class Song implements Serializable {
             parentFreq = cache.get(node.getParentId());
         }
 
-        // 1. Resolve core ratio value
         double coreRatio = node.getInterval().getRatioValue();
-
-        // 2. Apply Inversion Direction Flag (-inv) -> Reciprocal execution
-        if (node.isInverted()) {
-            if (coreRatio != 0) {
-                coreRatio = 1.0 / coreRatio;
-            }
+        if (node.isInverted() && coreRatio != 0) {
+            coreRatio = 1.0 / coreRatio;
         }
-
-        // 3. Apply Octave Shifts Factor Coefficient -> 2^n scaling multiplier
         double octaveMultiplier = Math.pow(2.0, node.getOctaveShift());
-
-        // Final Composite Cascade Multiplication
         double freq = parentFreq * coreRatio * octaveMultiplier;
         cache.put(node.getId(), freq);
     }
@@ -182,7 +166,9 @@ public class Song implements Serializable {
         StringBuilder sb = new StringBuilder("=== RELATIVE MULTI-DIMENSIONAL JUST RATIO NETWORK ===\n");
 
         for (Chord c : chords) {
-            sb.append(String.format("Chord %s: \"%s\" [%s]\n", c.getChordId(), c.getName(), c.getDuration()));
+            // UPDATED PRINT FORMAT: Outputs rich figure labels and beat durations
+            sb.append(String.format("Chord %s: \"%s\" [Duration: %s, Time: %s beats]\n",
+              c.getChordId(), c.getName(), c.getDuration().getVisualIcon(), c.getDuration().getBeatsValue()));
 
             HarmonicNode r = c.getRootNode();
             sb.append(String.format("  └─ Tonic %s (Ref: %s, Int: %s, Octave: %+d, Inv: %b) -> %.2f Hz\n",

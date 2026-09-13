@@ -11,6 +11,7 @@ import src.main.java.com.composer.core.usecase.base.TransactionalFlow;
 import src.main.java.com.composer.infrastructure.ui.SongMonitorWindow;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -23,7 +24,7 @@ public class AddChordFlow implements TransactionalFlow {
 
   private String resolvedParentId = null;
   private int overtoneCount = 0;
-  private Duration chordDuration = Duration.QUARTER;
+  private Duration chordDuration = Duration.QUARTER; // Now maps onto the rich entity instance
 
   private static class NodeSpecificationBlueprint {
     Interval interval;
@@ -34,9 +35,8 @@ public class AddChordFlow implements TransactionalFlow {
   private final NodeSpecificationBlueprint tonicBlueprint = new NodeSpecificationBlueprint();
   private final List<NodeSpecificationBlueprint> overtonesBlueprints = new ArrayList<>();
 
-  // Compiled pattern to parse interval token and optional inline modifiers
-  private static final Pattern BLUEPRINT_PARSER_PATTERN = Pattern.compile(
-    "^([^\\s-]+)(?:\\s+-oct\\s+([+-]?\\d+))?(?:\s+(-inv))?$",
+  private static final Pattern SPEC_PARSER_PATTERN = Pattern.compile(
+    "^(?:-custom\\s+\"([^\"]+)\"|([^\\s-]+))(?:\\s+-oct\\s+([+-]?\\d+))?(?:\\s+(-inv))?$",
     Pattern.CASE_INSENSITIVE
   );
 
@@ -57,7 +57,7 @@ public class AddChordFlow implements TransactionalFlow {
     String currentTonicId = "T" + chordIndex;
 
     uiWindow.printToTerminal("\n----------------------------------------------------------------------");
-    uiWindow.printToTerminal(String.format(" >>> ADVANCED COGNITIVE WORKSPACE: Designing Chord %d (%s) <<< ", chordIndex, currentTonicId));
+    uiWindow.printToTerminal(String.format(" >>> MNEMONIC GRAPH WORKSPACE: Designing Chord %d (%s) <<< ", chordIndex, currentTonicId));
     if (customChordName != null && !customChordName.isBlank()) {
       uiWindow.printToTerminal(" -> Meta Tag Alias Assigned: \"" + customChordName + "\"");
     }
@@ -66,10 +66,10 @@ public class AddChordFlow implements TransactionalFlow {
     boolean hasInlineCount = (inlineArgument != null && inlineArgument.matches("^\\d+$"));
     if (hasInlineCount) {
       this.overtoneCount = Integer.parseInt(inlineArgument);
-      uiWindow.printToTerminal("-> Overtone architectural payload density pre-configured to: " + this.overtoneCount);
+      uiWindow.printToTerminal("-> Overtone payload density pre-configured to: " + this.overtoneCount);
     }
 
-    // STEP 1: Resolve Tonic Root Parent and Properties
+    // STEP 1: Resolve Tonic Root Reference
     if (chordIndex == 1) {
       this.resolvedParentId = null;
       this.tonicBlueprint.interval = Interval.PERFECT_UNISON;
@@ -95,11 +95,11 @@ public class AddChordFlow implements TransactionalFlow {
       executeStep(stepRef);
 
       uiWindow.printToTerminal("\n--- Define Tonic Specifications ---");
-      printIntervalMenu();
-      executeSpecificationWorkflowStep("Configure Tonic (e.g., '2 -oct +1 -inv' or '3/2'): ", this.tonicBlueprint);
+      printIntervalMenuWithFlags();
+      executeSpecificationWorkflowStep("Configure Tonic (e.g., '2M' or '-custom \"(3/2)*2\" -oct -1'): ", this.tonicBlueprint);
     }
 
-    // STEP 2: Request Overtone branch counts (If not inline)
+    // STEP 2: Request Overtone branch counts
     if (!hasInlineCount) {
       FlowStep<Integer> stepOvertonesCount = new FlowStep<>(
         "How many Overtones will branch out from this Tonic? (e.g., 2): ",
@@ -110,9 +110,9 @@ public class AddChordFlow implements TransactionalFlow {
       executeStep(stepOvertonesCount);
     }
 
-    // STEP 3: Build individual Overtone specifications in single unified prompts
+    // STEP 3: Build individual Overtone specifications
     if (overtoneCount > 0) {
-      printIntervalMenu();
+      printIntervalMenuWithFlags();
     }
     for (int i = 0; i < overtoneCount; i++) {
       int overtoneIdx = i + 1;
@@ -124,16 +124,18 @@ public class AddChordFlow implements TransactionalFlow {
       overtonesBlueprints.add(overtoneBp);
     }
 
-    // STEP 4: Request structural duration profile
-    printDurationMenu();
+    // --- REFACTORED STEP 4: MNEMONIC DURATION CAPTURE ---
+    printDurationMenuWithAliases();
     FlowStep<Duration> stepDuration = new FlowStep<>(
-      "Select Duration Index for this chord footprint block: ",
-      "^\\d+$",
-      "Invalid selection index.",
+      "Select Chord Note Duration Figure (e.g., '2', '0.5', 'quarter', '8th'): ",
+      "^.+$", // Accepts free token formats to evaluate inside the functional lambda block
+      "Unregistered duration token.",
       input -> {
-        int choice = Integer.parseInt(input);
-        if (choice < 0 || choice >= Duration.values().length) throw new IllegalArgumentException();
-        this.chordDuration = Duration.values()[choice];
+        Duration resolvedDuration = Duration.fromAlias(input.trim());
+        if (resolvedDuration == null) {
+          throw new IllegalArgumentException(String.format("The duration symbol/value '%s' is not registered inside the workspace catalog.", input));
+        }
+        this.chordDuration = resolvedDuration;
       }
     );
     executeStep(stepDuration);
@@ -162,51 +164,41 @@ public class AddChordFlow implements TransactionalFlow {
     uiWindow.printToTerminal("----------------------------------------------------------------------");
   }
 
-  /**
-   * UNIFIED COMPACT WORKFLOW STEP
-   * Parses the interval token and its flags (-oct, -inv) in a single user input interaction.
-   */
   private void executeSpecificationWorkflowStep(String prompt, NodeSpecificationBlueprint blueprint) throws FlowContext.CancelException, FlowContext.ExitException {
     FlowStep<NodeSpecificationBlueprint> unifiedStep = new FlowStep<>(
       prompt,
-      "^.+$", // Accept any string to handle tokenization manually inside the parser block
-      "Invalid entry format syntax.",
+      "^.+$",
+      "Invalid entry layout pattern signature syntax.",
       input -> {
-        Matcher matcher = BLUEPRINT_PARSER_PATTERN.matcher(input.trim());
+        Matcher matcher = SPEC_PARSER_PATTERN.matcher(input.trim());
         if (!matcher.matches()) {
-          throw new IllegalArgumentException("Input format does not match required layout syntax configuration rules.");
+          throw new IllegalArgumentException("Syntax error. Use: '<alias>' or '-custom \"expr\"' with optional modifiers.");
         }
+        String customExprToken = matcher.group(1);
+        String standardAliasToken = matcher.group(2);
 
-        // 1. Parse Interval Token (Can be index position number, fraction or math equation string)
-        String intervalToken = matcher.group(1);
-        if (intervalToken.matches("^\\d+$")) {
-          int choice = Integer.parseInt(intervalToken);
-          // Skip index 0 (which was the old custom token placeholder) and validate bounds
-          if (choice <= 0 || choice >= Interval.values().length) {
-            throw new IllegalArgumentException("Selected list index integer is out of bounds.");
-          }
-          blueprint.interval = Interval.values()[choice];
-        } else {
-          // It's a direct fraction or math formula sacada de la chistera!
-          String cleanExpr = intervalToken.replaceAll("\\s+", "");
+        if (customExprToken != null) {
+          String cleanExpr = customExprToken.replaceAll("\\s+", "");
           double evaluated = Interval.evaluateMathExpression(cleanExpr);
-          uiWindow.printToTerminal(String.format("   [Parsed] Expression resolved to a raw multiplier ratio of: %.4f", evaluated));
-          blueprint.interval = new Interval("CHISTER_EXPR", cleanExpr);
+          uiWindow.printToTerminal(String.format("   [Parsed] -custom expression resolved to ratio multiplier: %.4f", evaluated));
+          blueprint.interval = new Interval("CUSTOM_EXPR", cleanExpr);
+        } else if (standardAliasToken != null) {
+          Interval resolved = Interval.fromAlias(standardAliasToken);
+          if (resolved == null)
+            throw new IllegalArgumentException(String.format("Mnemonic alias '%s' is not registered.", standardAliasToken));
+          blueprint.interval = resolved;
         }
 
-        // 2. Parse Inline Octave Shift Flag (-oct)
-        if (matcher.group(2) != null) {
-          String octaveToken = matcher.group(2);
+        if (matcher.group(3) != null) {
+          String octaveToken = matcher.group(3);
           if (octaveToken.startsWith("+")) octaveToken = octaveToken.substring(1);
           blueprint.octaveShift = Integer.parseInt(octaveToken);
         } else {
-          blueprint.octaveShift = 0; // Default fallback
+          blueprint.octaveShift = 0;
         }
-
-        // 3. Parse Inline Inversion Direction Flag (-inv)
-
-        blueprint.inverted = (matcher.group(3) != null);
-      });
+        blueprint.inverted = (matcher.group(4) != null);
+      }
+    );
     executeStep(unifiedStep);
   }
 
@@ -222,7 +214,7 @@ public class AddChordFlow implements TransactionalFlow {
         step.process(rawInput);
         break;
       } catch (Exception e) {
-        uiWindow.printToTerminal("   [!] ERROR: " + e.getMessage());
+        uiWindow.printToTerminal("   [!] ERROR: " + e.getLocalizedMessage());
       }
     }
   }
@@ -238,22 +230,26 @@ public class AddChordFlow implements TransactionalFlow {
     } uiWindow.printToTerminal("------------------------------------------");
   }
 
-  private void printIntervalMenu() {
-    uiWindow.printToTerminal("\n--- Available Proportional Just Intervals ---");
-    Interval[] vals = Interval.values();
-    for (int i = 1; i < vals.length; i++) {
-      // Start at index 1 to omit the old CUSTOM placeholder item
-      uiWindow.printToTerminal(String.format(" [%d] %s (Ratio: %s)", i, vals[i].name(), vals[i].getExpression()));
+  private void printIntervalMenuWithFlags() {
+    uiWindow.printToTerminal("\n=================== SCORE INPUT SPECIFICATION LEGEND ===================");
+    uiWindow.printToTerminal(" Available Registered Mnemonic Aliases:");
+    for (Interval interval : Interval.getSystemIntervals()) {
+      uiWindow.printToTerminal(String.format("  • %-18s (Ratio: %-6s) -> Accepted IDs: %s", interval.name(), interval.getExpression(), Arrays.toString(interval.getAliases())));
     }
-    uiWindow.printToTerminal("----------------------------------------------");
+    uiWindow.printToTerminal("------------------------------------------------------------------------");
+    uiWindow.printToTerminal(" Inline Flag Modifiers:");
+    uiWindow.printToTerminal("  -> -oct     Shifts octaves up or down (e.g., '-oct +2', '-oct -1'). Default: 0.");
+    uiWindow.printToTerminal("  -> -inv           Inverts the interval direction down (reciprocal calculation).");
+    uiWindow.printToTerminal("  -> -custom \"expr\" Bypasses catalog to process custom math equations (e.g., -custom \" (3 / 2) * 4 \")");
+    uiWindow.printToTerminal("========================================================================\n");
   }
 
-  private void printDurationMenu() {
-    uiWindow.printToTerminal("\n--- Note Duration Blueprints ---");
-    Duration[] vals = Duration.values();
-    for (int i = 0; i < vals.length; i++) {
-      uiWindow.printToTerminal(String.format(" [%d] %s", i, vals[i].name()));
+  /*** NEW RICH NOTE INTERACTIVE MENU* Documents traditional notation glyphs, exact beat counts, and string identifiers.*/
+  private void printDurationMenuWithAliases() {
+    uiWindow.printToTerminal("\n=================== NOTE FIGURE BLUEPRINT MENU ===================");
+    for (Duration d : Duration.getSystemDurations()) {
+      uiWindow.printToTerminal(String.format("  • %-30s -> Mnemonic Trigger Keys: %s", d.getVisualIcon(), Arrays.toString(d.getAliases())));
     }
-    uiWindow.printToTerminal("--------------------------------");
+    uiWindow.printToTerminal("==================================================================\n");
   }
 }

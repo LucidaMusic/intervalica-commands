@@ -1,108 +1,102 @@
 package src.main.java.com.composer.core.domain.types;
 
-import java.io.Serial;
 import java.io.Serializable;
+import java.util.HashMap;
+import java.util.Map;
 
 public class Interval implements Serializable {
-    @Serial
-    private static final long serialVersionUID = 2L;
-
-    // --- Developer Blueprints ---
-    public static final Interval CUSTOM             = new Interval("CUSTOM_EXPRESSION", "0"); // Intercept token
-    public static final Interval PERFECT_UNISON     = new Interval("PERFECT_UNISON", "1/1");
-    public static final Interval MINOR_THIRD_JUST   = new Interval("MINOR_THIRD_JUST", "6/5");
-    public static final Interval MAJOR_THIRD_JUST   = new Interval("MAJOR_THIRD_JUST", "5/4");
-    public static final Interval PERFECT_FOURTH     = new Interval("PERFECT_FOURTH", "4/3");
-    public static final Interval PERFECT_FIFTH      = new Interval("PERFECT_FIFTH", "3/2");
-    public static final Interval MICROTONAL_STEP    = new Interval("MICROTONAL_STEP", "1.18");
-    public static final Interval PERFECT_OCTAVE     = new Interval("PERFECT_OCTAVE", "2");
-
-    private static final Interval[] VALUES = {
-      CUSTOM, PERFECT_UNISON, MINOR_THIRD_JUST, MAJOR_THIRD_JUST,
-      PERFECT_FOURTH, PERFECT_FIFTH, MICROTONAL_STEP, PERFECT_OCTAVE
-    };
-
-    public static Interval[] values() { return VALUES; }
+    private static final long serialVersionUID = 3L;
 
     private final String name;
     private final String expression;
     private final double ratioValue;
+    private final String[] aliases;
 
-    public Interval(String name, String expression) {
+    public Interval(String name, String expression, String... aliases) {
         this.name = name;
         this.expression = expression;
         this.ratioValue = name.equals("CUSTOM_EXPRESSION") ? 0.0 : evaluateMathExpression(expression);
+        this.aliases = aliases;
+    }
+
+    // --- NEW: REUSE BLUEPRINTS WITH MULTIPLE RECALL ALIASES (Case Insensitive) ---
+    public static final Interval PERFECT_UNISON   = new Interval("PERFECT_UNISON", "1/1", "1", "1u", "unison");
+    public static final Interval MINOR_SECOND     = new Interval("MINOR_SECOND", "16/15", "2m", "minor2");
+    public static final Interval MAJOR_SECOND     = new Interval("MAJOR_SECOND", "9/8", "2M", "2", "major2");
+    public static final Interval MINOR_THIRD_JUST = new Interval("MINOR_THIRD_JUST", "6/5", "3m", "minor3");
+    public static final Interval MAJOR_THIRD_JUST = new Interval("MAJOR_THIRD_JUST", "5/4", "3M", "3", "major3");
+    public static final Interval PERFECT_FOURTH   = new Interval("PERFECT_FOURTH", "4/3", "4", "4j", "fourth");
+    public static final Interval PERFECT_FIFTH    = new Interval("PERFECT_FIFTH", "3/2", "5", "5j", "5pure", "fifth");
+    public static final Interval PERFECT_OCTAVE   = new Interval("PERFECT_OCTAVE", "2", "8", "8j", "octave");
+
+    private static final Interval[] SYSTEM_INTERVALS = {
+      PERFECT_UNISON, MINOR_SECOND, MAJOR_SECOND, MINOR_THIRD_JUST,
+      MAJOR_THIRD_JUST, PERFECT_FOURTH, PERFECT_FIFTH, PERFECT_OCTAVE
+    };
+
+    private static final Map<String, Interval> ALIAS_MAP = new HashMap<>();
+
+    static {
+        for (Interval interval : SYSTEM_INTERVALS) {
+            for (String alias : interval.aliases) {
+                ALIAS_MAP.put(alias.toLowerCase(), interval);
+            }
+        }
+    }
+
+    public static Interval[] getSystemIntervals() { return SYSTEM_INTERVALS; }
+
+    /**
+     * Resolves an input token string into a verified Interval instance.
+     */
+    public static Interval fromAlias(String token) {
+        if (token == null) return null;
+        return ALIAS_MAP.get(token.trim().toLowerCase());
     }
 
     public String name() { return name; }
     public String getExpression() { return expression; }
     public double getRatioValue() { return ratioValue; }
+    public String[] getAliases() { return aliases; }
 
     /**
-     * ADVANCED INLINE MATH PARSER
-     * Parses standard operators (+, -, *, /) and parenthesis recursively without external libraries.
+     * ADVANCED INLINE MATH PARSER (Unchanged, operates pure fractions/decimals calculations)
      */
     public static double evaluateMathExpression(String str) {
         return new Object() {
             int pos = -1, ch;
-
-            void nextChar() {
-                ch = (++pos < str.length()) ? str.charAt(pos) : -1;
-            }
-
+            void nextChar() { ch = (++pos < str.length()) ? str.charAt(pos) : -1; }
             boolean eat(int charToEat) {
                 while (ch == ' ') nextChar();
-                if (ch == charToEat) {
-                    nextChar();
-                    return true;
-                }
+                if (ch == charToEat) { nextChar(); return true; }
                 return false;
             }
-
-            double parse() {
-                nextChar();
-                double x = parseExpression();
-                if (pos < str.length()) throw new RuntimeException("Unexpected mathematical character: " + (char)ch);
-                return x;
-            }
-
+            double parse() { nextChar(); double x = parseExpression(); return x; }
             double parseExpression() {
                 double x = parseTerm();
                 for (;;) {
-                    if      (eat('+')) x += parseTerm(); // addition
-                    else if (eat('-')) x -= parseTerm(); // subtraction
+                    if      (eat('+')) x += parseTerm();
+                    else if (eat('-')) x -= parseTerm();
                     else return x;
                 }
             }
-
             double parseTerm() {
                 double x = parseFactor();
                 for (;;) {
-                    if      (eat('*')) x *= parseFactor(); // multiplication
-                    else if (eat('/')) {
-                        double divisor = parseFactor();
-                        if (divisor == 0) throw new ArithmeticException("Division by zero ratio.");
-                        x /= divisor; // division
-                    }
+                    if      (eat('*')) x *= parseFactor();
+                    else if (eat('/')) { double div = parseFactor(); if (div == 0) throw new ArithmeticException(); x /= div; }
                     else return x;
                 }
             }
-
             double parseFactor() {
-                if (eat('+')) return parseFactor(); // unary plus
-                if (eat('-')) return -parseFactor(); // unary minus
-
-                double x;
-                int startPos = this.pos;
-                if (eat('(')) { // parentheses
-                    x = parseExpression();
-                    eat(')');
-                } else if ((ch >= '0' && ch <= '9') || ch == '.') { // numbers
+                if (eat('+')) return parseFactor();
+                if (eat('-')) return -parseFactor();
+                double x; int startPos = this.pos;
+                if (eat('(')) { x = parseExpression(); eat(')'); }
+                else if ((ch >= '0' && ch <= '9') || ch == '.') {
                     while ((ch >= '0' && ch <= '9') || ch == '.') nextChar();
                     x = Double.parseDouble(str.substring(startPos, this.pos));
-                } else {
-                    throw new RuntimeException("Unexpected parsing factor character: " + (char)ch);
-                }
+                } else { throw new RuntimeException("Unexpected token character: " + (char)ch); }
                 return x;
             }
         }.parse();
