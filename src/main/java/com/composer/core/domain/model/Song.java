@@ -3,6 +3,7 @@ package src.main.java.com.composer.core.domain.model;
 import src.main.java.com.composer.core.domain.types.Duration;
 import src.main.java.com.composer.core.domain.types.Interval;
 
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -10,39 +11,45 @@ import java.util.List;
 import java.util.Map;
 
 public class Song implements Serializable {
-    private static final long serialVersionUID = 3L; // Incremented tracker footprint version
+    private static final long serialVersionUID = 4L; // Updated blueprint signature version
 
     public static class HarmonicNode implements Serializable {
-        private static final long longSerialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
         private final String id;
         private final String parentId;
         private final Interval interval;
+        private final int octaveShift;  // NEW: Integer tracking (+2, -1, 0...)
+        private final boolean inverted; // NEW: Boolean flag for interval inversion inversion (-inv)
         private final String label;
 
-        public HarmonicNode(String id, String parentId, Interval interval, String label) {
+        public HarmonicNode(String id, String parentId, Interval interval, int octaveShift, boolean inverted, String label) {
             this.id = id;
             this.parentId = parentId;
             this.interval = interval;
+            this.octaveShift = octaveShift;
+            this.inverted = inverted;
             this.label = label;
         }
 
         public String getId() { return id; }
         public String getParentId() { return parentId; }
         public Interval getInterval() { return interval; }
+        public int getOctaveShift() { return octaveShift; }
+        public boolean isInverted() { return inverted; }
         public String getLabel() { return label; }
     }
 
     public static class Chord implements Serializable {
-        private static final long serialVersionUID = 3L; // Incremented version
+        @Serial
+        private static final long serialVersionUID = 3L;
         private final String chordId;
-        private final String name; // NEW: Human-readable alias name label annotation
+        private final String name;
         private final HarmonicNode rootNode;
         private final List<HarmonicNode> overtones = new ArrayList<>();
         private final Duration duration;
 
         public Chord(String chordId, String name, HarmonicNode rootNode, Duration duration) {
             this.chordId = chordId;
-            // Fallback syntax to avoid empty text representations
             this.name = (name == null || name.isBlank()) ? "Chord " + chordId.replaceAll("\\D+", "") : name.trim();
             this.rootNode = rootNode;
             this.duration = duration;
@@ -55,8 +62,8 @@ public class Song implements Serializable {
         public Duration getDuration() { return duration; }
     }
 
-    private String title = "Relative Graph Score";
-    private String author = "Graph Composer";
+    private String title = "Advanced Multi-Dimensional Score Blueprint";
+    private String author = "Graph Composer Expert";
     private int bpm = 120;
     private double referenceFrequency = 440.0;
 
@@ -100,6 +107,10 @@ public class Song implements Serializable {
         return calculated;
     }
 
+    /**
+     * CORE CALCULATION ENGINE (UPDATED MULTI-DIMENSIONAL LOGIC)
+     * Dynamically processes: Base Ratio * Inversion Rules * Octave Shifting Coefficients
+     */
     private void resolveNodeFrequency(HarmonicNode node, Map<String, Double> cache) {
         if (cache.containsKey(node.getId())) return;
 
@@ -116,7 +127,21 @@ public class Song implements Serializable {
             parentFreq = cache.get(node.getParentId());
         }
 
-        double freq = parentFreq * node.getInterval().getRatioValue();
+        // 1. Resolve core ratio value
+        double coreRatio = node.getInterval().getRatioValue();
+
+        // 2. Apply Inversion Direction Flag (-inv) -> Reciprocal execution
+        if (node.isInverted()) {
+            if (coreRatio != 0) {
+                coreRatio = 1.0 / coreRatio;
+            }
+        }
+
+        // 3. Apply Octave Shifts Factor Coefficient -> 2^n scaling multiplier
+        double octaveMultiplier = Math.pow(2.0, node.getOctaveShift());
+
+        // Final Composite Cascade Multiplication
+        double freq = parentFreq * coreRatio * octaveMultiplier;
         cache.put(node.getId(), freq);
     }
 
@@ -154,20 +179,27 @@ public class Song implements Serializable {
         if (chords.isEmpty()) return "--- Empty Structural Just Intonation DAG Score ---";
 
         Map<String, Double> frequencies = computeFrequencies();
-        StringBuilder sb = new StringBuilder("=== RELATIVE JUST RATIO GRAPH NETWORK ===\n");
+        StringBuilder sb = new StringBuilder("=== RELATIVE MULTI-DIMENSIONAL JUST RATIO NETWORK ===\n");
 
         for (Chord c : chords) {
-            HarmonicNode r = c.getRootNode();
-            // UPDATED HEADER: Displays custom names aligned next to the structural ID
             sb.append(String.format("Chord %s: \"%s\" [%s]\n", c.getChordId(), c.getName(), c.getDuration()));
-            sb.append(String.format("  └─ Tonic %s (Ref: %s, Int: %s) -> %.2f Hz\n",
-              r.getId(), (r.getParentId() == null ? "BASE" : r.getParentId()), r.getInterval().name(), frequencies.getOrDefault(r.getId(), referenceFrequency)));
+
+            HarmonicNode r = c.getRootNode();
+            sb.append(String.format("  └─ Tonic %s (Ref: %s, Int: %s, Octave: %+d, Inv: %b) -> %.2f Hz\n",
+              r.getId(),
+              (r.getParentId() == null ? "BASE" : r.getParentId()),
+              r.getInterval().name() + "[" + r.getInterval().getExpression() + "]",
+              r.getOctaveShift(), r.isInverted(),
+              frequencies.getOrDefault(r.getId(), referenceFrequency)));
 
             for (HarmonicNode o : c.getOvertones()) {
-                sb.append(String.format("      ├── Overtone %s (Ref: %s, Int: %s) -> %.2f Hz\n",
-                  o.getId(), o.getParentId(), o.getInterval().name(), frequencies.getOrDefault(o.getId(), referenceFrequency)));
+                sb.append(String.format("      ├── Overtone %s (Ref: %s, Int: %s, Octave: %+d, Inv: %b) -> %.2f Hz\n",
+                  o.getId(), o.getParentId(),
+                  o.getInterval().name() + "[" + o.getInterval().getExpression() + "]",
+                  o.getOctaveShift(), o.isInverted(),
+                  frequencies.getOrDefault(o.getId(), referenceFrequency)));
             }
-            sb.append("\n"); // Visual space separation
+            sb.append("\n");
         }
         return sb.toString();
     }
