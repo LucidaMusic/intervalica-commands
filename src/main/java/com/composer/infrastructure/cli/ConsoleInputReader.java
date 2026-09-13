@@ -1,6 +1,7 @@
-package com.composer.infrastructure.cli;
+package src.main.java.com.composer.infrastructure.cli;
 
-import com.composer.core.usecase.base.FlowContext;
+import src.main.java.com.composer.core.usecase.base.FlowContext;
+
 import java.util.Scanner;
 
 public class ConsoleInputReader {

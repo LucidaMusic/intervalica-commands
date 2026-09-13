@@ -1,6 +1,7 @@
-package com.composer.core.domain.model;
+package src.main.java.com.composer.core.domain.model;
 
-import com.composer.infrastructure.ui.SongMonitorWindow;
+import src.main.java.com.composer.infrastructure.ui.SongMonitorWindow;
+
 import java.util.Stack;
 
 public class CommandHistoryManager {

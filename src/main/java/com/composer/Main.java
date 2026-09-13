@@ -1,8 +1,9 @@
-package com.composer;
+package src.main.java.com.composer;
 
-import com.composer.core.domain.model.CommandHistoryManager;
-import com.composer.core.domain.model.Song;
-import com.composer.infrastructure.ui.SongMonitorWindow;
+
+import src.main.java.com.composer.core.domain.model.CommandHistoryManager;
+import src.main.java.com.composer.core.domain.model.Song;
+import src.main.java.com.composer.infrastructure.ui.SongMonitorWindow;
 
 import javax.swing.SwingUtilities;
 

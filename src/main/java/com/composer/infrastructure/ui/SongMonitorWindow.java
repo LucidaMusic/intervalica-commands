@@ -1,9 +1,11 @@
-package com.composer.infrastructure.ui;
+package src.main.java.com.composer.infrastructure.ui;
 
-import com.composer.core.domain.model.CommandHistoryManager;
-import com.composer.core.domain.model.Song;
-import com.composer.core.usecase.base.FlowContext;
-import com.composer.infrastructure.cli.CommandRouter;
+
+
+import src.main.java.com.composer.core.domain.model.CommandHistoryManager;
+import src.main.java.com.composer.core.domain.model.Song;
+import src.main.java.com.composer.core.usecase.base.FlowContext;
+import src.main.java.com.composer.infrastructure.cli.CommandRouter;
 
 import javax.swing.*;
 import java.awt.*;

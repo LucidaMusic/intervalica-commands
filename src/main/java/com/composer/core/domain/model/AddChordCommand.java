@@ -1,4 +1,4 @@
-package com.composer.core.domain.model;
+package src.main.java.com.composer.core.domain.model;
 
 public class AddChordCommand implements Command {
     private final Song song;

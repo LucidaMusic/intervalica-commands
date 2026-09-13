@@ -1,4 +1,4 @@
-package com.composer.core.usecase.base;
+package src.main.java.com.composer.core.usecase.base;
 
 public class FlowContext {
     public static class CancelException extends Exception {

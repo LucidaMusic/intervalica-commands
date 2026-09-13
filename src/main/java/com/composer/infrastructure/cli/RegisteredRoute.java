@@ -1,4 +1,4 @@
-package com.composer.infrastructure.cli;
+package src.main.java.com.composer.infrastructure.cli;
 
 import java.util.regex.Pattern;
 

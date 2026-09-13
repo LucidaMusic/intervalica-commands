@@ -1,4 +1,4 @@
-package com.composer.core.domain.types;
+package src.main.java.com.composer.core.domain.types;
 
 import java.io.Serializable;
 

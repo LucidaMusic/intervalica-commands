@@ -1,11 +1,11 @@
-package com.composer.infrastructure.cli;
+package src.main.java.com.composer.infrastructure.cli;
 
-import com.composer.core.domain.model.CommandHistoryManager;
-import com.composer.core.domain.model.Song;
-import com.composer.core.usecase.base.FlowContext;
-import com.composer.core.usecase.base.TransactionalFlow;
-import com.composer.core.usecase.impl.AddChordFlow;
-import com.composer.infrastructure.ui.SongMonitorWindow;
+
+import src.main.java.com.composer.core.domain.model.CommandHistoryManager;
+import src.main.java.com.composer.core.domain.model.Song;
+import src.main.java.com.composer.core.usecase.base.FlowContext;
+import src.main.java.com.composer.core.usecase.impl.AddChordFlow;
+import src.main.java.com.composer.infrastructure.ui.SongMonitorWindow;
 
 import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -28,12 +28,18 @@ public class CommandRouter {
     }
 
     private void registerSystemRoutes() {
-        // 1. Core Structural Pipeline Flows
+        // 1. Core Structural Pipeline Flows (ADVANCED REGEX FLAG PATTERN INTERCEPTOR)
+        // Matches combinations of optional -name "XYZ" and optional interval counts
         registry.add(new RegisteredRoute(
-          "^add[- ]chord(?:\\s+(\\d+))?$", "add-chord <optional-count>", "Launches interactive multi-step composition flow.",
+          "^add[- ]chord(?:\\s+-name\\s+\"([^\"]+)\")?(?:\\s+(\\d+))?$",
+          "add-chord -name \"<alias>\" <count>",
+          "Launches composition flow with an optional name tag shortcut option.",
           (input, matcher, s, h, ui) -> {
-              String inlineArg = (matcher.groupCount() >= 1) ? matcher.group(1) : null;
-              new AddChordFlow(h, ui).execute(s, inlineArg);
+              String extractedName = matcher.group(1); // Group 1 captures inside -name "..."
+              String inlineCountArg = matcher.group(2); // Group 2 captures the tailing digits
+
+              // Trigger usecase workflow injecting both extracted metadata elements
+              new AddChordFlow(h, ui, extractedName).execute(s, inlineCountArg);
           }
         ));
 
@@ -81,7 +87,7 @@ public class CommandRouter {
           }
         ));
 
-        // 4. State Persistence Engine (UPDATED REGEX TO MATCH STANDALONE COMMANDS)
+        // 4. State Persistence Engine
         registry.add(new RegisteredRoute(
           "^save$", "save", "Opens native dialogue window to serialize current score directly to disk.",
           (input, matcher, s, h, ui) -> handleNativeSave()
@@ -111,7 +117,6 @@ public class CommandRouter {
 
     public void handleCommand(String rawCommandLine) throws FlowContext.ExitException, FlowContext.CancelException {
         String trimmed = rawCommandLine.trim();
-
         for (RegisteredRoute route : registry) {
             Matcher matcher = route.getPattern().matcher(trimmed);
             if (matcher.matches()) {
@@ -122,67 +127,43 @@ public class CommandRouter {
         uiWindow.printToTerminal("[Error] Command context mismatch. Type 'help' to audit syntax options.");
     }
 
-    /**
-     * NATIVE WINDOWS/OS SAVE FILE DIALOGUE
-     */
     private void handleNativeSave() {
-        // Ejecutamos de forma síncrona en el Event Dispatch Thread de Swing para evitar bloqueos de hilos
         SwingUtilities.invokeLater(() -> {
             JFileChooser fileChooser = new JFileChooser();
             fileChooser.setDialogTitle("Save Your Score Blueprint Location");
-
-            // Forzar filtro exclusivo de nuestra app .score
             FileNameExtensionFilter filter = new FileNameExtensionFilter("Musical Score Files (*.score)", "score");
             fileChooser.setFileFilter(filter);
-
             int userSelection = fileChooser.showSaveDialog(uiWindow);
             if (userSelection == JFileChooser.APPROVE_OPTION) {
                 File fileToSave = fileChooser.getSelectedFile();
                 String filePath = fileToSave.getAbsolutePath();
-
-                // Asegurar de forma amigable que el archivo termine con la extensión .score si el usuario no la escribió
-                if (!filePath.toLowerCase().endsWith(".score")) {
-                    filePath += ".score";
-                }
-
+                if (!filePath.toLowerCase().endsWith(".score")) filePath += ".score";
                 try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(filePath))) {
                     oos.writeObject(song);
-                    uiWindow.printToTerminal("[Success] Score metadata successfully written onto physical block location: " + filePath);
+                    uiWindow.printToTerminal("[Success] Score metadata successfully written onto: " + filePath);
                 } catch (IOException e) {
-                    uiWindow.printToTerminal("[IO Error] Failed to write binary file stream to OS explorer: " + e.getMessage());
+                    uiWindow.printToTerminal("[IO Error] Failed to write file stream: " + e.getMessage());
                 }
-            } else {
-                uiWindow.printToTerminal("[Process] Save execution aborted by user dialog action.");
             }
         });
     }
 
-    /**
-     * NATIVE WINDOWS/OS LOAD FILE DIALOGUE
-     */
     private void handleNativeLoad() {
         SwingUtilities.invokeLater(() -> {
             JFileChooser fileChooser = new JFileChooser();
             fileChooser.setDialogTitle("Open Existing Score Blueprint File");
-
             FileNameExtensionFilter filter = new FileNameExtensionFilter("Musical Score Files (*.score)", "score");
             fileChooser.setFileFilter(filter);
-
             int userSelection = fileChooser.showOpenDialog(uiWindow);
             if (userSelection == JFileChooser.APPROVE_OPTION) {
                 File fileToLoad = fileChooser.getSelectedFile();
-
                 try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(fileToLoad))) {
                     Song loadedSong = (Song) ois.readObject();
-
-                    // Copia transaccional de los campos dentro de la instancia existente compartida por la UI
                     song.copyFrom(loadedSong);
-                    uiWindow.printToTerminal("[Success] Score layout session state retrieved and mounted flawlessly from: " + fileToLoad.getName());
+                    uiWindow.printToTerminal("[Success] Score layout session state mounted from: " + fileToLoad.getName());
                 } catch (Exception e) {
-                    uiWindow.printToTerminal("[Format Error] Could not parse file layout footprint. Is it a valid *.score archive? - " + e.getMessage());
+                    uiWindow.printToTerminal("[Format Error] Could not parse file layout footprint: " + e.getMessage());
                 }
-            } else {
-                uiWindow.printToTerminal("[Process] Load execution cancelled.");
             }
         });
     }
@@ -190,10 +171,10 @@ public class CommandRouter {
     private void printHelp() {
         uiWindow.printToTerminal("\n=== Interactive CLI Studio Matrix Dynamic Help ===");
         for (RegisteredRoute route : registry) {
-            uiWindow.printToTerminal(String.format(" -> %-30s %s", route.getSyntaxHelp(), route.getDescriptionHelp()));
+            uiWindow.printToTerminal(String.format(" -> %-35s %s", route.getSyntaxHelp(), route.getDescriptionHelp()));
         }
-        uiWindow.printToTerminal(String.format(" -> %-30s %s", "cancel", "Aborts current active sequence flow immediately."));
-        uiWindow.printToTerminal(String.format(" -> %-30s %s", "exit / quit", "Terminates application execution context cleanly."));
+        uiWindow.printToTerminal(String.format(" -> %-35s %s", "cancel", "Aborts current active sequence flow immediately."));
+        uiWindow.printToTerminal(String.format(" -> %-35s %s", "exit / quit", "Terminates application execution context cleanly."));
         uiWindow.printToTerminal("===================================================\n");
     }
 }

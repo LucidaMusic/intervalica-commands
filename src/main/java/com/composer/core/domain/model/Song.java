@@ -1,7 +1,8 @@
-package com.composer.core.domain.model;
+package src.main.java.com.composer.core.domain.model;
 
-import com.composer.core.domain.types.Duration;
-import com.composer.core.domain.types.Interval;
+import src.main.java.com.composer.core.domain.types.Duration;
+import src.main.java.com.composer.core.domain.types.Interval;
+
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -9,14 +10,14 @@ import java.util.List;
 import java.util.Map;
 
 public class Song implements Serializable {
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 3L; // Incremented tracker footprint version
 
     public static class HarmonicNode implements Serializable {
-        private static final long serialVersionUID = 1L;
+        private static final long longSerialVersionUID = 1L;
         private final String id;
-        private final String parentId; // Si es nulo, referencia a la frecuencia base absoluta de la canción
+        private final String parentId;
         private final Interval interval;
-        private final String label; // Para saber si es Root u Overtone en los listados
+        private final String label;
 
         public HarmonicNode(String id, String parentId, Interval interval, String label) {
             this.id = id;
@@ -32,19 +33,23 @@ public class Song implements Serializable {
     }
 
     public static class Chord implements Serializable {
-        private static final long serialVersionUID = 2L;
+        private static final long serialVersionUID = 3L; // Incremented version
         private final String chordId;
+        private final String name; // NEW: Human-readable alias name label annotation
         private final HarmonicNode rootNode;
         private final List<HarmonicNode> overtones = new ArrayList<>();
         private final Duration duration;
 
-        public Chord(String chordId, HarmonicNode rootNode, Duration duration) {
+        public Chord(String chordId, String name, HarmonicNode rootNode, Duration duration) {
             this.chordId = chordId;
+            // Fallback syntax to avoid empty text representations
+            this.name = (name == null || name.isBlank()) ? "Chord " + chordId.replaceAll("\\D+", "") : name.trim();
             this.rootNode = rootNode;
             this.duration = duration;
         }
 
         public String getChordId() { return chordId; }
+        public String getName() { return name; }
         public HarmonicNode getRootNode() { return rootNode; }
         public List<HarmonicNode> getOvertones() { return overtones; }
         public Duration getDuration() { return duration; }
@@ -58,7 +63,6 @@ public class Song implements Serializable {
     private final List<Chord> chords = new ArrayList<>();
     private transient List<Runnable> listeners = new ArrayList<>();
 
-    // Registra un acorde en el grafo armónico
     public synchronized void addChordInstance(Chord chord) {
         chords.add(chord);
         notifyListeners();
@@ -72,7 +76,6 @@ public class Song implements Serializable {
 
     public synchronized List<Chord> getChords() { return new ArrayList<>(chords); }
 
-    // Busca un nodo dentro de cualquier acorde de la canción por su identificador exclusivo
     public synchronized HarmonicNode findNodeById(String id) {
         if (id == null) return null;
         for (Chord c : chords) {
@@ -86,14 +89,8 @@ public class Song implements Serializable {
 
     public synchronized int getNextChordIndex() { return chords.size() + 1; }
 
-    /**
-     * COMPUTATION ENGINE: RESOLVE GRAPH FREQUENCIES
-     * Recorre las ramas recursivamente evaluando semitonos relativos en cascada.
-     */
     public synchronized Map<String, Double> computeFrequencies() {
         Map<String, Double> calculated = new LinkedHashMap<>();
-
-        // Primera pasada para tónicas y overtones
         for (Chord c : chords) {
             resolveNodeFrequency(c.getRootNode(), calculated);
             for (HarmonicNode o : c.getOvertones()) {
@@ -119,15 +116,10 @@ public class Song implements Serializable {
             parentFreq = cache.get(node.getParentId());
         }
 
-        // --- NEW MATHEMATICAL CALCULATION: DIRECT JUST RATIO MULTIPLICATION ---
-        // Instead of Math.pow(2, semi/12), we multiply directly by the rational factor
         double freq = parentFreq * node.getInterval().getRatioValue();
-        // ----------------------------------------------------------------------
-
         cache.put(node.getId(), freq);
     }
 
-    // Getters / Setters estándar
     public synchronized String getTitle() { return title; }
     public synchronized void setTitle(String title) { this.title = title; notifyListeners(); }
     public synchronized String getAuthor() { return author; }
@@ -159,21 +151,23 @@ public class Song implements Serializable {
 
     @Override
     public synchronized String toString() {
-        if (chords.isEmpty()) return "--- Empty Structural DAG Score ---";
+        if (chords.isEmpty()) return "--- Empty Structural Just Intonation DAG Score ---";
 
         Map<String, Double> frequencies = computeFrequencies();
-        StringBuilder sb = new StringBuilder("=== RELATIVE GRAPH NETWORK ARCHITECTURE ===\n");
+        StringBuilder sb = new StringBuilder("=== RELATIVE JUST RATIO GRAPH NETWORK ===\n");
 
         for (Chord c : chords) {
             HarmonicNode r = c.getRootNode();
-            sb.append(String.format("Chord %s [%s]\n", c.getChordId(), c.getDuration()));
+            // UPDATED HEADER: Displays custom names aligned next to the structural ID
+            sb.append(String.format("Chord %s: \"%s\" [%s]\n", c.getChordId(), c.getName(), c.getDuration()));
             sb.append(String.format("  └─ Tonic %s (Ref: %s, Int: %s) -> %.2f Hz\n",
-              r.getId(), (r.getParentId() == null ? "BASE" : r.getParentId()), r.getInterval(), frequencies.getOrDefault(r.getId(), referenceFrequency)));
+              r.getId(), (r.getParentId() == null ? "BASE" : r.getParentId()), r.getInterval().name(), frequencies.getOrDefault(r.getId(), referenceFrequency)));
 
             for (HarmonicNode o : c.getOvertones()) {
                 sb.append(String.format("      ├── Overtone %s (Ref: %s, Int: %s) -> %.2f Hz\n",
-                  o.getId(), o.getParentId(), o.getInterval(), frequencies.getOrDefault(o.getId(), referenceFrequency)));
+                  o.getId(), o.getParentId(), o.getInterval().name(), frequencies.getOrDefault(o.getId(), referenceFrequency)));
             }
+            sb.append("\n"); // Visual space separation
         }
         return sb.toString();
     }

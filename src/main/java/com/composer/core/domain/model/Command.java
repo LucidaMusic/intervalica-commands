@@ -1,4 +1,4 @@
-package com.composer.core.domain.model;
+package src.main.java.com.composer.core.domain.model;
 
 public interface Command {
     void execute();

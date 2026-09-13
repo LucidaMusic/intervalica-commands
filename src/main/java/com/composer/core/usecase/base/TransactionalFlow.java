@@ -1,6 +1,7 @@
-package com.composer.core.usecase.base;
+package src.main.java.com.composer.core.usecase.base;
 
-import com.composer.core.domain.model.Song;
+
+import src.main.java.com.composer.core.domain.model.Song;
 
 public interface TransactionalFlow {
     void execute(Song targetSong, String inlineArgument) 
