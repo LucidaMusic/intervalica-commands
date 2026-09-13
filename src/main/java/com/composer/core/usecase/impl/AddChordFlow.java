@@ -24,7 +24,6 @@ public class AddChordFlow implements TransactionalFlow {
 
   private String resolvedParentId = null;
   private int overtoneCount = 0;
-  private Duration chordDuration = Duration.QUARTER; // Now maps onto the rich entity instance
 
   private static class NodeSpecificationBlueprint {
     Interval interval;
@@ -78,7 +77,7 @@ public class AddChordFlow implements TransactionalFlow {
       uiWindow.printToTerminal("-> First chord automated default anchor: absolute BASE frequency via PERFECT_UNISON (1/1).");
     } else {
       printAvailableNodesMenu(targetSong);
-      FlowStep<String> stepRef = new FlowStep<>(
+      FlowStep stepRef = new FlowStep(
         "Enter Target Parent Node ID for this Tonic (or type 'BASE'): ",
         "^[a-zA-Z0-9_]+$",
         "Invalid ID pattern syntax.",
@@ -101,7 +100,7 @@ public class AddChordFlow implements TransactionalFlow {
 
     // STEP 2: Request Overtone branch counts
     if (!hasInlineCount) {
-      FlowStep<Integer> stepOvertonesCount = new FlowStep<>(
+      FlowStep stepOvertonesCount = new FlowStep(
         "How many Overtones will branch out from this Tonic? (e.g., 2): ",
         "^\\d+$",
         "Please enter a valid positive integer.",
@@ -126,7 +125,7 @@ public class AddChordFlow implements TransactionalFlow {
 
     // --- REFACTORED STEP 4: MNEMONIC DURATION CAPTURE ---
     printDurationMenuWithAliases();
-    FlowStep<Duration> stepDuration = new FlowStep<>(
+    FlowStep stepDuration = new FlowStep(
       "Select Chord Note Duration Figure (e.g., '2', '0.5', 'quarter', '8th'): ",
       "^.+$", // Accepts free token formats to evaluate inside the functional lambda block
       "Unregistered duration token.",
@@ -135,7 +134,7 @@ public class AddChordFlow implements TransactionalFlow {
         if (resolvedDuration == null) {
           throw new IllegalArgumentException(String.format("The duration symbol/value '%s' is not registered inside the workspace catalog.", input));
         }
-        this.chordDuration = resolvedDuration;
+        // Now maps onto the rich entity instance
       }
     );
     executeStep(stepDuration);
@@ -145,6 +144,7 @@ public class AddChordFlow implements TransactionalFlow {
       currentTonicId, resolvedParentId, tonicBlueprint.interval,
       tonicBlueprint.octaveShift, tonicBlueprint.inverted, "ROOT"
     );
+    Duration chordDuration = Duration.QUARTER;
     Song.Chord operationalChord = new Song.Chord("C" + chordIndex, customChordName, rootNode, chordDuration);
 
     for (int i = 0; i < overtonesBlueprints.size(); i++) {
@@ -165,7 +165,7 @@ public class AddChordFlow implements TransactionalFlow {
   }
 
   private void executeSpecificationWorkflowStep(String prompt, NodeSpecificationBlueprint blueprint) throws FlowContext.CancelException, FlowContext.ExitException {
-    FlowStep<NodeSpecificationBlueprint> unifiedStep = new FlowStep<>(
+    FlowStep unifiedStep = new FlowStep(
       prompt,
       "^.+$",
       "Invalid entry layout pattern signature syntax.",
@@ -202,7 +202,7 @@ public class AddChordFlow implements TransactionalFlow {
     executeStep(unifiedStep);
   }
 
-  private void executeStep(FlowStep<?> step) throws FlowContext.CancelException, FlowContext.ExitException {
+  private void executeStep(FlowStep step) throws FlowContext.CancelException, FlowContext.ExitException {
     while (true) {
       uiWindow.printToTerminal(step.getPrompt());
       String rawInput = uiWindow.readInputFromUI();
@@ -227,7 +227,8 @@ public class AddChordFlow implements TransactionalFlow {
       for (Song.HarmonicNode o : c.getOvertones()) {
         uiWindow.printToTerminal(String.format("    ├── %s (Overtone Node)", o.getId()));
       }
-    } uiWindow.printToTerminal("------------------------------------------");
+    }
+    uiWindow.printToTerminal("------------------------------------------");
   }
 
   private void printIntervalMenuWithFlags() {
@@ -248,7 +249,7 @@ public class AddChordFlow implements TransactionalFlow {
   private void printDurationMenuWithAliases() {
     uiWindow.printToTerminal("\n=================== NOTE FIGURE BLUEPRINT MENU ===================");
     for (Duration d : Duration.getSystemDurations()) {
-      uiWindow.printToTerminal(String.format("  • %-30s -> Mnemonic Trigger Keys: %s", d.getVisualIcon(), Arrays.toString(d.getAliases())));
+      uiWindow.printToTerminal(String.format("  • %-30s -> Mnemonic Trigger Keys: %s", d.visualIcon(), Arrays.toString(d.aliases())));
     }
     uiWindow.printToTerminal("==================================================================\n");
   }

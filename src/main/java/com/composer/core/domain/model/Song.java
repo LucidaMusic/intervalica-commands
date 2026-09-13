@@ -1,9 +1,10 @@
 package src.main.java.com.composer.core.domain.model;
 
-
+import lombok.Getter;
 import src.main.java.com.composer.core.domain.types.Duration;
 import src.main.java.com.composer.core.domain.types.Interval;
 
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -11,15 +12,18 @@ import java.util.List;
 import java.util.Map;
 
 public class Song implements Serializable {
-  private static final long serialVersionUID = 6L; // Incremented tracker version
+  @Serial
+  private static final long serialVersionUID = 7L; // Updated structural fingerprint tracking version
 
+  @Getter
   public static class HarmonicNode implements Serializable {
+    @Serial
     private static final long serialVersionUID = 2L;
     private final String id;
-    private String parentId; // Made non-final to allow safe validation mutability
-    private Interval interval; // Made non-final
-    private int octaveShift;  // Made non-final
-    private boolean inverted; // Made non-final
+    private String parentId;
+    private Interval interval;
+    private int octaveShift;
+    private boolean inverted;
     private final String label;
 
     public HarmonicNode(String id, String parentId, Interval interval, int octaveShift, boolean inverted, String label) {
@@ -31,7 +35,6 @@ public class Song implements Serializable {
       this.label = label;
     }
 
-    // Internal transaction worker setter package-private visibility
     void mutateProperties(String parentId, Interval interval, int octaveShift, boolean inverted) {
       this.parentId = parentId;
       this.interval = interval;
@@ -39,38 +42,17 @@ public class Song implements Serializable {
       this.inverted = inverted;
     }
 
-    public String getId() {
-      return id;
-    }
-
-    public String getParentId() {
-      return parentId;
-    }
-
-    public Interval getInterval() {
-      return interval;
-    }
-
-    public int getOctaveShift() {
-      return octaveShift;
-    }
-
-    public boolean isInverted() {
-      return inverted;
-    }
-
-    public String getLabel() {
-      return label;
-    }
   }
 
+  @Getter
   public static class Chord implements Serializable {
+    @Serial
     private static final long serialVersionUID = 4L;
     private final String chordId;
-    private String name; // Made non-final to support edit mutations
+    private String name;
     private final HarmonicNode rootNode;
     private final List<HarmonicNode> overtones = new ArrayList<>();
-    private Duration duration; // Made non-final to support duration updates
+    private Duration duration;
 
     public Chord(String chordId, String name, HarmonicNode rootNode, Duration duration) {
       this.chordId = chordId;
@@ -84,25 +66,6 @@ public class Song implements Serializable {
       if (duration != null) this.duration = duration;
     }
 
-    public String getChordId() {
-      return chordId;
-    }
-
-    public String getName() {
-      return name;
-    }
-
-    public HarmonicNode getRootNode() {
-      return rootNode;
-    }
-
-    public List<HarmonicNode> getOvertones() {
-      return overtones;
-    }
-
-    public Duration getDuration() {
-      return duration;
-    }
   }
 
   private String title = "Advanced Secure Relational Graph Score";
@@ -129,6 +92,11 @@ public class Song implements Serializable {
     }
   }
 
+  public synchronized void clearAllChords() {
+    chords.clear();
+    notifyListeners();
+  }
+
   public synchronized List<Chord> getChords() {
     return new ArrayList<>(chords);
   }
@@ -137,6 +105,16 @@ public class Song implements Serializable {
     if (id == null) return null;
     for (Chord c : chords) {
       if (c.getChordId().equalsIgnoreCase(id)) return c;
+    }
+    return null;
+  }
+
+  public synchronized Chord findChordByOvertoneId(String overtoneId) {
+    if (overtoneId == null) return null;
+    for (Chord c : chords) {
+      for (HarmonicNode o : c.getOvertones()) {
+        if (o.getId().equalsIgnoreCase(overtoneId)) return c;
+      }
     }
     return null;
   }
@@ -152,10 +130,6 @@ public class Song implements Serializable {
     return null;
   }
 
-  /**
-   * CHORD ORDER INDEX FINDER
-   * Returns the relative chronological placement index of a chord.
-   */
   public synchronized int getChordChronologicalIndex(String chordId) {
     for (int i = 0; i < chords.size(); i++) {
       if (chords.get(i).getChordId().equalsIgnoreCase(chordId)) return i;
@@ -163,38 +137,61 @@ public class Song implements Serializable {
     return -1;
   }
 
-  /**
-   * FIXED & SECURED SECURITY MANAGER: DEPENDENCY CHECKER
-   * Comprehensive scan to prevent relational graph fracturing caused by case mismatch
-   * or undetected overtone-to-overtone structural dependencies.
-   */
   public synchronized List<String> verifyDeletionSafety(String chordId) {
     List<String> blockingDependencies = new ArrayList<>();
     Chord targetChord = findChordById(chordId);
     if (targetChord == null) return blockingDependencies;
 
-    // 1. Collect all protected Node IDs belonging to this chord block in lowercase
     List<String> protectedIdsLowercase = new ArrayList<>();
     protectedIdsLowercase.add(targetChord.getRootNode().getId().toLowerCase());
     for (HarmonicNode o : targetChord.getOvertones()) {
       protectedIdsLowercase.add(o.getId().toLowerCase());
     }
 
-    // 2. Scan EVERY subsequent chord block in the chronological tree layout timeline
     int chronologicalLimit = chords.indexOf(targetChord);
     for (int i = chronologicalLimit + 1; i < chords.size(); i++) {
       Chord subsequentChord = chords.get(i);
 
-      // Check subsequent Tonic Root node dependency
       HarmonicNode subRoot = subsequentChord.getRootNode();
       if (subRoot.getParentId() != null && protectedIdsLowercase.contains(subRoot.getParentId().toLowerCase())) {
         blockingDependencies.add(String.format("Tonic %s of Chord %s (\"%s\")",
           subRoot.getId(), subsequentChord.getChordId(), subsequentChord.getName()));
       }
 
-      // FIXED: Now we ALSO scan every subsequent Overtone node dependency to prevent ghost orphans
       for (HarmonicNode subOvertone : subsequentChord.getOvertones()) {
         if (subOvertone.getParentId() != null && protectedIdsLowercase.contains(subOvertone.getParentId().toLowerCase())) {
+          blockingDependencies.add(String.format("Overtone %s of Chord %s (\"%s\")",
+            subOvertone.getId(), subsequentChord.getChordId(), subsequentChord.getName()));
+        }
+      }
+    }
+    return blockingDependencies;
+  }
+
+  /**
+   * NEW INTEGRITY CHECKER: SPECIFIC OVERTONE DELETION SAFETY
+   * Verifies if any subsequent node branches off a single isolated overtone before removing it.
+   */
+  public synchronized List<String> verifyOvertoneDeletionSafety(String overtoneId) {
+    List<String> blockingDependencies = new ArrayList<>();
+    if (overtoneId == null) return blockingDependencies;
+
+    String targetLower = overtoneId.trim().toLowerCase();
+    Chord parentChord = findChordByOvertoneId(overtoneId);
+    if (parentChord == null) return blockingDependencies;
+
+    int chronologicalLimit = chords.indexOf(parentChord);
+    for (int i = chronologicalLimit + 1; i < chords.size(); i++) {
+      Chord subsequentChord = chords.get(i);
+
+      HarmonicNode subRoot = subsequentChord.getRootNode();
+      if (subRoot.getParentId() != null && subRoot.getParentId().toLowerCase().equals(targetLower)) {
+        blockingDependencies.add(String.format("Tonic %s of Chord %s (\"%s\")",
+          subRoot.getId(), subsequentChord.getChordId(), subsequentChord.getName()));
+      }
+
+      for (HarmonicNode subOvertone : subsequentChord.getOvertones()) {
+        if (subOvertone.getParentId() != null && subOvertone.getParentId().toLowerCase().equals(targetLower)) {
           blockingDependencies.add(String.format("Overtone %s of Chord %s (\"%s\")",
             subOvertone.getId(), subsequentChord.getChordId(), subsequentChord.getName()));
         }
@@ -302,36 +299,14 @@ public class Song implements Serializable {
   @Override
   public synchronized String toString() {
     if (chords.isEmpty()) return "--- Empty Structural Just Intonation DAG Score ---";
-
     Map<String, Double> frequencies = computeFrequencies();
     StringBuilder sb = new StringBuilder("=== RELATIVE MULTI-DIMENSIONAL JUST RATIO NETWORK ===\n");
-
     for (Chord c : chords) {
-      // CORRECCIÓN: Se eliminó el String.format redundante y se pasaron los 4 argumentos correlativos a .formatted()
-      sb.append("Chord %s: \"%s\" [Duration: %s, Time: %s beats]\n".formatted(
-        c.getChordId(),
-        c.getName(),
-        c.getDuration().getVisualIcon(),
-        c.getDuration().getBeatsValue()
-      ));
-
+      sb.append("Chord %s: \"%s\" [Duration: %s, Time: %s beats]\n".formatted(c.getChordId(), c.getName(), c.getDuration().visualIcon(), c.getDuration().beatsValue()));
       HarmonicNode r = c.getRootNode();
-      sb.append(String.format("  └─ Tonic %s (Ref: %s, Int: %s, Octave: %+d, Inv: %b) -> %.2f Hz\n",
-        r.getId(),
-        (r.getParentId() == null ? "BASE" : r.getParentId()),
-        r.getInterval().name() + "[" + r.getInterval().getExpression() + "]",
-        r.getOctaveShift(),
-        r.isInverted(),
-        frequencies.getOrDefault(r.getId(), referenceFrequency)));
-
+      sb.append(String.format("  └─ Tonic %s (Ref: %s, Int: %s, Octave: %+d, Inv: %b) -> %.2f Hz\n", r.getId(), (r.getParentId() == null ? "BASE" : r.getParentId()), r.getInterval().name() + "[" + r.getInterval().getExpression() + "]", r.getOctaveShift(), r.isInverted(), frequencies.getOrDefault(r.getId(), referenceFrequency)));
       for (HarmonicNode o : c.getOvertones()) {
-        sb.append(String.format("      ├── Overtone %s (Ref: %s, Int: %s, Octave: %+d, Inv: %b) -> %.2f Hz\n",
-          o.getId(),
-          o.getParentId(),
-          o.getInterval().name() + "[" + o.getInterval().getExpression() + "]",
-          o.getOctaveShift(),
-          o.isInverted(),
-          frequencies.getOrDefault(o.getId(), referenceFrequency)));
+        sb.append(String.format("      ├── Overtone %s (Ref: %s, Int: %s, Octave: %+d, Inv: %b) -> %.2f Hz\n", o.getId(), o.getParentId(), o.getInterval().name() + "[" + o.getInterval().getExpression() + "]", o.getOctaveShift(), o.isInverted(), frequencies.getOrDefault(o.getId(), referenceFrequency)));
       }
       sb.append("\n");
     }
